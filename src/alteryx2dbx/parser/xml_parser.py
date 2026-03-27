@@ -90,9 +90,18 @@ def _parse_tools(root: ET.Element) -> dict[int, AlteryxTool]:
     for node in root.findall(".//Nodes/Node"):
         tool_id = int(node.get("ToolID", "0"))
 
+        # Skip disabled nodes
+        disabled_el = node.find(".//Properties/Disabled")
+        if disabled_el is not None and disabled_el.get("value", "False") == "True":
+            continue
+
         # Extract plugin from GuiSettings
         gui_settings = node.find("GuiSettings")
         plugin = gui_settings.get("Plugin", "") if gui_settings is not None else ""
+
+        # Skip ToolContainer nodes (visual-only grouping, no data logic)
+        if "ToolContainer" in plugin:
+            continue
 
         # Derive tool_type: last segment of the dotted plugin name
         tool_type = plugin.rsplit(".", 1)[-1] if plugin else ""
