@@ -27,6 +27,21 @@ _DIRECT_MAP: dict[str, str] = {
     "padright": "F.rpad",
     "regex_replace": "F.regexp_replace",
     "replacechar": "F.translate",
+    "titlecase": "F.initcap",
+    "reversestring": "F.reverse",
+    "log": "F.log",
+    "log10": "F.log10",
+    "log2": "F.log2",
+    "exp": "F.exp",
+    "sin": "F.sin",
+    "cos": "F.cos",
+    "tan": "F.tan",
+    "asin": "F.asin",
+    "acos": "F.acos",
+    "atan": "F.atan",
+    "atan2": "F.atan2",
+    "rand": "F.rand",
+    "sign": "F.signum",
 }
 
 
@@ -138,6 +153,20 @@ class PySparkEmitter(Transformer):
     def lte(self, children):
         return f"({children[0]} <= {children[2]})"
 
+    def in_expr(self, children):
+        value = children[0]
+        # children[1] is IN token, rest are args
+        args = []
+        for c in children[1:]:
+            if isinstance(c, Token):
+                continue
+            if isinstance(c, list):
+                args = c
+            else:
+                args.append(c)
+        values_str = ", ".join(str(a) for a in args)
+        return f"{value}.isin({values_str})"
+
     # ── Logical ────────────────────────────────────────────────
 
     def or_expr(self, children):
@@ -184,6 +213,20 @@ class PySparkEmitter(Transformer):
         # children: ELSEIF_token, cond, THEN_token, val
         parts = [c for c in children if not isinstance(c, Token)]
         return (parts[0], parts[1])
+
+    # ── Date format conversion ───────────────────────────────────
+
+    _DT_FMT_MAP = {
+        "%Y": "yyyy", "%y": "yy", "%m": "MM", "%d": "dd",
+        "%H": "HH", "%M": "mm", "%S": "ss", "%p": "a",
+        "%B": "MMMM", "%b": "MMM", "%A": "EEEE", "%a": "EEE",
+    }
+
+    def _convert_dt_format(self, fmt):
+        result = fmt
+        for ayx, spark in self._DT_FMT_MAP.items():
+            result = result.replace(ayx, spark)
+        return result
 
     # ── Function calls ─────────────────────────────────────────
 
@@ -236,6 +279,110 @@ class PySparkEmitter(Transformer):
             return f'F.split({args[0]}, " ").getItem({args[1]})'
         if func_lower == "datetimenow":
             return "F.current_timestamp()"
+
+        # Switch
+        if func_lower == "switch":
+            # Switch(field, default, val1, result1, val2, result2, ...)
+            field_expr = args[0]
+            default_expr = args[1]
+            pairs = list(zip(args[2::2], args[3::2]))
+            result = ""
+            for val, res in pairs:
+                if result:
+                    result += f".when({field_expr} == {val}, {res})"
+                else:
+                    result = f"F.when({field_expr} == {val}, {res})"
+            result += f".otherwise({default_expr})"
+            return result
+
+        # Conversion
+        if func_lower == "tointeger":
+            return f'{args[0]}.cast("int")'
+        if func_lower == "todate":
+            return f'{args[0]}.cast("date")'
+        if func_lower == "todatetime":
+            return f'{args[0]}.cast("timestamp")'
+
+        # Null handling
+        if func_lower == "coalesce":
+            return f"F.coalesce({', '.join(args)})"
+        if func_lower == "ifnull":
+            return f"F.coalesce({args[0]}, {args[1]})"
+        if func_lower == "nullif":
+            return f"F.when({args[0]} == {args[1]}, F.lit(None)).otherwise({args[0]})"
+
+        # DateTime — format strings must be plain strings, NOT F.lit()
+        if func_lower == "datetimeformat":
+            fmt = self._extract_string_val(args[1]) if len(args) > 1 and self._is_string_lit(args[1]) else "yyyy-MM-dd"
+            spark_fmt = self._convert_dt_format(fmt)
+            return f'F.date_format({args[0]}, "{spark_fmt}")'
+
+        if func_lower == "datetimeparse":
+            fmt = self._extract_string_val(args[1]) if len(args) > 1 and self._is_string_lit(args[1]) else "yyyy-MM-dd"
+            spark_fmt = self._convert_dt_format(fmt)
+            return f'F.to_timestamp({args[0]}, "{spark_fmt}")'
+
+        if func_lower == "datetimeadd":
+            dt, interval = args[0], args[1]
+            unit = self._extract_string_val(args[2]).lower() if len(args) > 2 and self._is_string_lit(args[2]) else "day"
+            if unit in ("day", "days"):
+                return f"F.date_add({dt}, {interval})"
+            elif unit in ("month", "months"):
+                return f"F.add_months({dt}, {interval})"
+            elif unit in ("year", "years"):
+                return f"F.add_months({dt}, ({interval}) * 12)"
+            return f"F.date_add({dt}, {interval})"
+
+        if func_lower == "datetimediff":
+            return f"F.datediff({args[0]}, {args[1]})"
+
+        if func_lower == "datetimetoday":
+            return "F.current_date()"
+
+        if func_lower in ("datetimeyear", "year"):
+            return f"F.year({args[0]})"
+        if func_lower in ("datetimemonth", "month"):
+            return f"F.month({args[0]})"
+        if func_lower in ("datetimeday", "day"):
+            return f"F.dayofmonth({args[0]})"
+        if func_lower in ("datetimehour", "hour"):
+            return f"F.hour({args[0]})"
+        if func_lower in ("datetimeminutes", "minute"):
+            return f"F.minute({args[0]})"
+        if func_lower in ("datetimeseconds", "second"):
+            return f"F.second({args[0]})"
+        if func_lower in ("datetimedayofweek", "dayofweek"):
+            return f"F.dayofweek({args[0]})"
+
+        if func_lower == "datetimefirstofmonth":
+            return f"F.date_trunc('month', {args[0]})"
+
+        if func_lower == "datetimetrim":
+            unit = self._extract_string_val(args[1]) if len(args) > 1 and self._is_string_lit(args[1]) else "day"
+            return f"F.date_trunc('{unit}', {args[0]})"
+
+        # String extras
+        if func_lower == "countwords":
+            return f'F.size(F.split(F.trim({args[0]}), "\\\\s+"))'
+        if func_lower == "replace":
+            return f"F.regexp_replace({args[0]}, {args[1]}, {args[2]})"
+        if func_lower == "replacefirst":
+            return f"F.regexp_replace({args[0]}, {args[1]}, {args[2]})"
+
+        # Test
+        if func_lower == "isnumber":
+            return f'{args[0]}.cast("double").isNotNull()'
+        if func_lower == "isinteger":
+            return f'{args[0]}.cast("int").isNotNull()'
+
+        # Mid (alias for Substring, 0-based)
+        if func_lower == "mid":
+            start = args[1]
+            m = re.match(r"F\.lit\((\d+)\)", start)
+            if m:
+                start_val = int(m.group(1)) + 1
+                return f"F.substring({args[0]}, {start_val}, {args[2]})"
+            return f"F.substring({args[0]}, ({start} + F.lit(1)), {args[2]})"
 
         # Direct-mapped functions
         if func_lower in _DIRECT_MAP:

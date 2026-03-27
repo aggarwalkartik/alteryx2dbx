@@ -18,6 +18,7 @@ start: expr
     | NOT not_expr              -> not_expr
 
 ?comparison: add_expr
+    | add_expr IN "(" func_args ")"   -> in_expr
     | add_expr EQ add_expr      -> eq
     | add_expr EQEQ add_expr   -> eq
     | add_expr NEQ add_expr     -> neq
@@ -78,6 +79,7 @@ ENDIF: /[Ee][Nn][Dd][Ii][Ff]/
 AND: /[Aa][Nn][Dd]/ | "&&"
 OR: /[Oo][Rr]/ | "||"
 NOT: /[Nn][Oo][Tt]/ | "!"
+IN.2: /[Ii][Nn]/
 
 // === Literals ===
 BOOL.2: /[Tt][Rr][Uu][Ee]/ | /[Ff][Aa][Ll][Ss][Ee]/
