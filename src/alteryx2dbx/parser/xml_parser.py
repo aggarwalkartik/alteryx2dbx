@@ -152,6 +152,30 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
         _extract_summarize_config(config_el, config)
     elif tool_type == "Sort":
         _extract_sort_config(config_el, config)
+    elif tool_type == "DataCleansing":
+        _extract_data_cleansing_config(config_el, config)
+    elif tool_type == "FindReplace":
+        _extract_find_replace_config(config_el, config)
+    elif tool_type == "Sample":
+        _extract_sample_config(config_el, config)
+    elif tool_type == "Unique":
+        _extract_unique_config(config_el, config)
+    elif tool_type == "CrossTab":
+        _extract_cross_tab_config(config_el, config)
+    elif tool_type == "Transpose":
+        _extract_transpose_config(config_el, config)
+    elif tool_type == "RunningTotal":
+        _extract_running_total_config(config_el, config)
+    elif tool_type == "GenerateRows":
+        _extract_generate_rows_config(config_el, config)
+    elif tool_type == "Tile":
+        _extract_tile_config(config_el, config)
+    elif tool_type == "RegEx":
+        _extract_regex_config(config_el, config)
+    elif tool_type == "TextToColumns":
+        _extract_text_to_columns_config(config_el, config)
+    elif tool_type == "DateTime":
+        _extract_date_time_config(config_el, config)
 
     return config
 
@@ -253,6 +277,247 @@ def _extract_sort_config(config_el: ET.Element, config: dict) -> None:
             })
     if fields:
         config["sort_fields"] = fields
+
+
+def _extract_data_cleansing_config(config_el: ET.Element, config: dict) -> None:
+    """Extract DataCleansing options and field list."""
+    for opt in ("RemoveNull", "RemoveWhitespace", "TrimWhitespace"):
+        el = config_el.find(opt)
+        if el is not None:
+            config[opt] = el.get("value", "True") == "True"
+
+    modify_case_el = config_el.find("ModifyCase")
+    if modify_case_el is not None:
+        config["ModifyCase"] = modify_case_el.text or modify_case_el.get("value", "")
+
+    fields: list[str] = []
+    fields_el = config_el.find("Fields")
+    if fields_el is not None:
+        for field_el in fields_el.findall("Field"):
+            fname = field_el.get("field", "")
+            if fname:
+                fields.append(fname)
+    if fields:
+        config["cleansing_fields"] = fields
+
+
+def _extract_find_replace_config(config_el: ET.Element, config: dict) -> None:
+    """Extract FindReplace configuration."""
+    find_field_el = config_el.find("FindField")
+    if find_field_el is not None:
+        config["find_field"] = find_field_el.get("field", "")
+
+    replace_field_el = config_el.find("ReplaceField")
+    if replace_field_el is not None:
+        config["replace_field"] = replace_field_el.get("field", "")
+
+    find_mode_el = config_el.find("FindMode")
+    if find_mode_el is not None:
+        config["find_mode"] = find_mode_el.text or "Normal"
+
+    # Also extract join fields if present (reuse existing join extraction)
+    _extract_join_config(config_el, config)
+
+
+def _extract_sample_config(config_el: ET.Element, config: dict) -> None:
+    """Extract Sample tool configuration."""
+    mode_el = config_el.find("Mode")
+    if mode_el is not None and mode_el.text:
+        config["sample_mode"] = mode_el.text
+
+    n_el = config_el.find("N")
+    if n_el is not None and n_el.text:
+        try:
+            config["sample_n"] = int(n_el.text)
+        except ValueError:
+            pass
+
+    pct_el = config_el.find("Pct")
+    if pct_el is not None and pct_el.text:
+        try:
+            config["sample_pct"] = float(pct_el.text)
+        except ValueError:
+            pass
+
+
+def _extract_unique_config(config_el: ET.Element, config: dict) -> None:
+    """Extract Unique tool configuration."""
+    fields = []
+    for field_el in config_el.findall(".//UniqueFields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            fields.append(fname)
+    if fields:
+        config["unique_fields"] = fields
+
+
+def _extract_cross_tab_config(config_el: ET.Element, config: dict) -> None:
+    """Extract CrossTab configuration."""
+    group_fields = []
+    for field_el in config_el.findall(".//GroupFields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            group_fields.append(fname)
+    if group_fields:
+        config["ct_group_fields"] = group_fields
+
+    header_el = config_el.find("HeaderField")
+    if header_el is not None and header_el.text:
+        config["ct_header_field"] = header_el.text
+
+    data_el = config_el.find("DataField")
+    if data_el is not None and data_el.text:
+        config["ct_data_field"] = data_el.text
+
+    method_el = config_el.find("Method")
+    if method_el is not None and method_el.text:
+        config["ct_method"] = method_el.text
+
+
+def _extract_transpose_config(config_el: ET.Element, config: dict) -> None:
+    """Extract Transpose configuration."""
+    key_fields = []
+    for field_el in config_el.findall(".//KeyFields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            key_fields.append(fname)
+    if key_fields:
+        config["tp_key_fields"] = key_fields
+
+    data_fields = []
+    for field_el in config_el.findall(".//DataFields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            data_fields.append(fname)
+    if data_fields:
+        config["tp_data_fields"] = data_fields
+
+
+def _extract_running_total_config(config_el: ET.Element, config: dict) -> None:
+    """Extract RunningTotal configuration."""
+    running_el = config_el.find("RunningField")
+    if running_el is not None and running_el.text:
+        config["rt_running_field"] = running_el.text
+
+    group_fields = []
+    for field_el in config_el.findall(".//GroupFields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            group_fields.append(fname)
+    if group_fields:
+        config["rt_group_fields"] = group_fields
+
+
+def _extract_generate_rows_config(config_el: ET.Element, config: dict) -> None:
+    """Extract GenerateRows configuration."""
+    init_el = config_el.find("InitExpression")
+    if init_el is not None and init_el.text:
+        config["gr_init"] = init_el.text
+
+    cond_el = config_el.find("ConditionExpression")
+    if cond_el is not None and cond_el.text:
+        config["gr_condition"] = cond_el.text
+
+    loop_el = config_el.find("LoopExpression")
+    if loop_el is not None and loop_el.text:
+        config["gr_loop"] = loop_el.text
+
+
+def _extract_tile_config(config_el: ET.Element, config: dict) -> None:
+    """Extract Tile configuration."""
+    method_el = config_el.find("Method")
+    if method_el is not None and method_el.text:
+        config["tile_method"] = method_el.text
+
+    num_el = config_el.find("NumTiles")
+    if num_el is not None and num_el.text:
+        try:
+            config["tile_num"] = int(num_el.text)
+        except ValueError:
+            pass
+
+    field_el = config_el.find("Field")
+    if field_el is not None and field_el.text:
+        config["tile_field"] = field_el.text
+
+
+def _extract_regex_config(config_el: ET.Element, config: dict) -> None:
+    """Extract RegEx configuration."""
+    field_el = config_el.find("Field")
+    if field_el is not None and field_el.text:
+        config["rx_field"] = field_el.text
+
+    # Try both RegExExpression and Expression tags
+    expr_el = config_el.find("RegExExpression")
+    if expr_el is None:
+        expr_el = config_el.find("Expression")
+    if expr_el is not None and expr_el.text:
+        config["rx_expression"] = expr_el.text
+
+    mode_el = config_el.find("Mode")
+    if mode_el is not None and mode_el.text:
+        config["rx_mode"] = mode_el.text
+
+    replace_el = config_el.find("ReplaceExpression")
+    if replace_el is not None and replace_el.text:
+        config["rx_replace"] = replace_el.text
+
+    output_fields = []
+    for of_el in config_el.findall(".//OutputFields/Field"):
+        fname = of_el.get("field", "")
+        if fname:
+            output_fields.append(fname)
+    if output_fields:
+        config["rx_output_fields"] = output_fields
+
+
+def _extract_text_to_columns_config(config_el: ET.Element, config: dict) -> None:
+    """Extract TextToColumns configuration."""
+    field_el = config_el.find("Field")
+    if field_el is not None and field_el.text:
+        config["ttc_field"] = field_el.text
+
+    delim_el = config_el.find("Delimiter")
+    if delim_el is not None and delim_el.text:
+        config["ttc_delimiter"] = delim_el.text
+
+    num_el = config_el.find("NumFields")
+    if num_el is not None and num_el.text:
+        try:
+            config["ttc_num_columns"] = int(num_el.text)
+        except ValueError:
+            pass
+
+    split_el = config_el.find("SplitToRows")
+    if split_el is not None:
+        config["ttc_split_to_rows"] = split_el.text == "True" or split_el.get("value", "False") == "True"
+
+    root_name_el = config_el.find("RootName")
+    if root_name_el is not None and root_name_el.text:
+        config["ttc_root_name"] = root_name_el.text
+
+
+def _extract_date_time_config(config_el: ET.Element, config: dict) -> None:
+    """Extract DateTime configuration."""
+    field_el = config_el.find("Field")
+    if field_el is not None and field_el.text:
+        config["dt_field"] = field_el.text
+
+    fmt_in_el = config_el.find("FormatIn")
+    if fmt_in_el is None:
+        fmt_in_el = config_el.find("Format")
+    if fmt_in_el is not None and fmt_in_el.text:
+        config["dt_format_in"] = fmt_in_el.text
+
+    fmt_out_el = config_el.find("FormatOut")
+    if fmt_out_el is None:
+        fmt_out_el = config_el.find("Format")
+    if fmt_out_el is not None and fmt_out_el.text:
+        config["dt_format_out"] = fmt_out_el.text
+
+    conv_el = config_el.find("Conversion")
+    if conv_el is not None and conv_el.text:
+        config["dt_conversion"] = conv_el.text
 
 
 def _extract_fields(node: ET.Element) -> list[AlteryxField]:
