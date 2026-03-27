@@ -176,6 +176,10 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
         _extract_text_to_columns_config(config_el, config)
     elif tool_type == "DateTime":
         _extract_date_time_config(config_el, config)
+    elif tool_type == "MultiRowFormula":
+        _extract_multi_row_formula_config(config_el, config)
+    elif tool_type == "MultiFieldFormula":
+        _extract_multi_field_formula_config(config_el, config)
 
     return config
 
@@ -518,6 +522,44 @@ def _extract_date_time_config(config_el: ET.Element, config: dict) -> None:
     conv_el = config_el.find("Conversion")
     if conv_el is not None and conv_el.text:
         config["dt_conversion"] = conv_el.text
+
+
+def _extract_multi_row_formula_config(config_el: ET.Element, config: dict) -> None:
+    """Extract MultiRowFormula configuration."""
+    expr_el = config_el.find("Expression")
+    if expr_el is not None and expr_el.text:
+        config["mrf_expression"] = expr_el.text
+
+    field_el = config_el.find("Field")
+    if field_el is not None and field_el.text:
+        config["mrf_field"] = field_el.text
+
+    group_fields = []
+    for gf_el in config_el.findall(".//GroupByFields/Field"):
+        fname = gf_el.get("field", "")
+        if fname:
+            group_fields.append(fname)
+    if group_fields:
+        config["mrf_group_fields"] = group_fields
+
+    num_rows_el = config_el.find("NumRows")
+    if num_rows_el is not None and num_rows_el.text:
+        config["mrf_num_rows"] = num_rows_el.text
+
+
+def _extract_multi_field_formula_config(config_el: ET.Element, config: dict) -> None:
+    """Extract MultiFieldFormula configuration."""
+    expr_el = config_el.find("Expression")
+    if expr_el is not None and expr_el.text:
+        config["mff_expression"] = expr_el.text
+
+    fields = []
+    for field_el in config_el.findall(".//Fields/Field"):
+        fname = field_el.get("field", "")
+        if fname:
+            fields.append(fname)
+    if fields:
+        config["mff_fields"] = fields
 
 
 def _extract_fields(node: ET.Element) -> list[AlteryxField]:

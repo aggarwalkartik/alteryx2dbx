@@ -23,3 +23,5 @@ from . import tile
 from . import regex
 from . import text_to_columns
 from . import date_time
+from . import multi_row_formula
+from . import multi_field_formula
