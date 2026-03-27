@@ -34,6 +34,18 @@ alteryx2dbx convert ./workflows/ -o ./output
 
 This recursively finds all `.yxmd` files and converts each one into its own output folder.
 
+### Batch mode with summary report
+
+```bash
+alteryx2dbx convert ./workflows/ -o ./output --report
+```
+
+When `--report` is passed, an aggregate `batch_report.md` is generated in the output directory with:
+- Total workflow count, tool count, and overall coverage
+- Per-workflow table sorted by confidence (lowest first)
+- Unsupported tool list per workflow
+- Error summary for any workflows that failed to convert
+
 ### Analyze a workflow (dry run)
 
 ```bash
@@ -79,24 +91,46 @@ output/<workflow_name>/
 | `04_validate.py` | DataComPy scaffold for comparing Alteryx output against Databricks output. |
 | `config.yml` | YAML with workflow name, version, source paths, and output paths. |
 | `conversion_report.md` | Confidence score per tool, average confidence, and count of tools needing manual review. |
+| `batch_report.md` | (With `--report`) Aggregate summary across all converted workflows. |
 
-## Supported Tools
+## Supported Tools (32 tool types)
 
 | Alteryx Tool | PySpark Equivalent | Handler |
 |--------------|--------------------|---------|
-| Input Data / DbFileInput | `spark.read.format(...)` (CSV, Excel, Parquet) | `InputDataHandler` |
-| Output Data / DbFileOutput | `df.write.format(...)` | `OutputDataHandler` |
+| InputData / DbFileInput | `spark.read.format(...)` (CSV, Excel, Parquet) | `InputDataHandler` |
+| TextInput | `spark.createDataFrame(...)` from inline data | `TextInputHandler` |
+| DynamicInput | `spark.read` with TODO for dynamic path resolution | `DynamicInputHandler` |
+| OutputData / DbFileOutput | `df.write.format(...)` | `OutputDataHandler` |
+| Browse / BrowseV2 | `display(df)` / `df.show()` | `BrowseHandler` |
 | Filter | `df.filter(expr)` with True/False branch outputs | `FilterHandler` |
 | Formula | `df.withColumn(name, expr)` per formula field | `FormulaHandler` |
+| MultiFieldFormula | `df.withColumn()` applied across matching columns | `MultiFieldFormulaHandler` |
+| MultiRowFormula | `F.lag()` / `F.lead()` window functions | `MultiRowFormulaHandler` |
 | Select / AlteryxSelect | `df.select(...)`, `df.drop(...)`, `df.withColumnRenamed(...)` | `SelectHandler` |
 | Join | `df.join(other, cond, type)` with joined/left-only/right-only outputs | `JoinHandler` |
-| Sort | `df.orderBy(...)` | `SortHandler` |
-| Summarize | `df.groupBy(...).agg(...)` with Sum, Count, Avg, Min, Max, First, Last, CountDistinct, Concat | `SummarizeHandler` |
 | Union | `df.unionByName(other, allowMissingColumns=True)` | `UnionHandler` |
+| AppendFields | `df.crossJoin(other)` | `AppendFieldsHandler` |
+| FindReplace | `F.regexp_replace()` / `F.when().otherwise()` | `FindReplaceHandler` |
+| Sort | `df.orderBy(...)` | `SortHandler` |
+| Sample | `df.limit(n)` / `df.sample(fraction)` | `SampleHandler` |
+| Unique | `df.dropDuplicates()` with unique/duplicate branch outputs | `UniqueHandler` |
+| Summarize | `df.groupBy(...).agg(...)` (Sum, Count, Avg, Min, Max, First, Last, CountDistinct, Concat) | `SummarizeHandler` |
+| CrossTab | `df.groupBy().pivot().agg()` | `CrossTabHandler` |
+| Transpose | `F.stack()` unpivot | `TransposeHandler` |
+| DataCleansing | `F.trim()`, `F.lower()`, null removal per column | `DataCleansingHandler` |
+| RegEx | `F.regexp_extract()` / `F.regexp_replace()` (match, parse, replace modes) | `RegExHandler` |
+| TextToColumns | `F.split()` with column expansion | `TextToColumnsHandler` |
+| DateTime | `F.to_timestamp()` / `F.date_format()` with format conversion | `DateTimeHandler` |
+| RecordID | `F.monotonically_increasing_id()` | `RecordIDHandler` |
+| AutoField | Pass-through (Spark infers types) | `AutoFieldHandler` |
+| CountRecords | `df.count()` into single-row DataFrame | `CountRecordsHandler` |
+| RunningTotal | `F.sum().over(Window)` | `RunningTotalHandler` |
+| GenerateRows | `spark.range()` with expression-based row generation | `GenerateRowsHandler` |
+| Tile | `F.ntile()` / `F.percent_rank()` window functions | `TileHandler` |
 
 Unsupported tools are passed through with a `TODO` comment and the original XML config preserved for manual conversion.
 
-## Expression Transpiler
+## Expression Transpiler (80+ functions)
 
 Alteryx formula expressions are parsed with a Lark grammar and transpiled to PySpark column expressions. The transpiler handles:
 
@@ -104,11 +138,33 @@ Alteryx formula expressions are parsed with a Lark grammar and transpiled to PyS
 - **Comparisons**: `=`, `!=`, `>`, `>=`, `<`, `<=`
 - **Logical operators**: `AND`, `OR`, `NOT`
 - **Conditionals**: `IF/ELSEIF/ELSE/ENDIF` and `IIF()`
+- **IN expressions**: `[Field] IN (1, 2, 3)` to `F.col("Field").isin(...)`
+- **Switch**: `Switch([Field], default, val1, res1, ...)` to `F.when().when()...otherwise()`
 - **Field references**: `[FieldName]` to `F.col("FieldName")`
 - **Row references**: `[Row-1:Revenue]` to `F.lag(F.col("Revenue"), 1)`
-- **30+ function mappings**: `Trim`, `Left`, `Right`, `Substring`, `Contains`, `FindString`, `ToString`, `ToNumber`, `IsNull`, `IsEmpty`, `RegEx_Match`, `RegEx_Replace`, `GetWord`, `DateTimeNow`, `Round`, `Ceil`, `Floor`, `Abs`, `Pow`, `Sqrt`, `PadLeft`, `PadRight`, and more
 
-**Semantic corrections** applied automatically:
+### String functions
+`Trim`, `TrimLeft`, `TrimRight`, `Length`, `Uppercase`, `Lowercase`, `TitleCase`, `ReverseString`, `Left`, `Right`, `Substring`, `Mid`, `Contains`, `StartsWith`, `EndsWith`, `FindString`, `GetWord`, `PadLeft`, `PadRight`, `Replace`, `ReplaceFirst`, `ReplaceChar`, `CountWords`
+
+### Numeric functions
+`Round`, `Ceil`, `Floor`, `Abs`, `Pow`, `Sqrt`, `Log`, `Log10`, `Log2`, `Exp`, `Min`, `Max`, `Sign`, `Rand`, `Sin`, `Cos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2`
+
+### Conversion functions
+`ToString`, `ToNumber`, `ToInteger`, `ToDate`, `ToDateTime`
+
+### Null handling
+`IsNull`, `IsEmpty`, `Coalesce`, `IfNull`, `NullIf`
+
+### Type testing
+`IsNumber`, `IsInteger`
+
+### RegEx functions
+`RegEx_Match`, `RegEx_Replace`
+
+### Date/Time functions
+`DateTimeNow`, `DateTimeToday`, `DateTimeFormat`, `DateTimeParse`, `DateTimeAdd`, `DateTimeDiff`, `DateTimeYear`/`Year`, `DateTimeMonth`/`Month`, `DateTimeDay`/`Day`, `DateTimeHour`/`Hour`, `DateTimeMinutes`/`Minute`, `DateTimeSeconds`/`Second`, `DateTimeDayOfWeek`/`DayOfWeek`, `DateTimeFirstOfMonth`, `DateTimeTrim`
+
+### Semantic corrections applied automatically
 
 | Alteryx Behavior | PySpark Translation | Why |
 |------------------|---------------------|-----|
@@ -116,6 +172,16 @@ Alteryx formula expressions are parsed with a Lark grammar and transpiled to PyS
 | `Substring(field, 0, 3)` is 0-based | `F.substring(col, 1, 3)` | Alteryx uses 0-based indexing; Spark uses 1-based |
 | `FindString` returns 0-based position | `F.locate(...) - 1` | Preserves original index semantics |
 | `=` with non-string values | `.eqNullSafe(...)` | Prevents silent null propagation |
+
+## Features
+
+- **Fan-out cache hints**: DataFrames used by 2+ downstream tools automatically get `.cache()` appended
+- **Syntax validation**: All generated notebooks are compile-checked; syntax errors are logged as warnings
+- **Disabled node detection**: Tools marked as disabled in Alteryx XML are flagged with network path warnings
+- **Network path warnings**: UNC paths (`\\server\...`) in generated code are flagged for migration to DBFS/S3/ADLS
+- **Batch mode with `--report`**: Aggregate conversion report across multiple workflows
+- **Per-workflow conversion report**: Confidence scores per tool with review notes
+- **Dual-output routing**: Filter (True/False), Unique (Unique/Duplicates), Join (Join/Left/Right) outputs routed correctly through the DAG
 
 ## How It Works
 
@@ -151,8 +217,6 @@ The following are not yet supported:
 - **Predictive/R tools** (Linear Regression, Decision Tree, R Tool)
 - **Calgary loader** and **detour/block-until-done** tools
 - **Nested macros** (`.yxmc` files referenced from within workflows)
-- **Dynamic input/output** tools
-- **Cross-tab** and **Transpose** tools (planned)
 
 Expressions using unsupported functions are emitted as `# TODO` comments with the original expression preserved.
 
