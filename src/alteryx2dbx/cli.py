@@ -3,6 +3,7 @@ import click
 from pathlib import Path
 from .parser.xml_parser import parse_yxmd
 from .generator.notebook import generate_notebooks
+from .generator.batch_report import generate_batch_report
 from .dag.resolver import resolve_dag
 from .handlers.registry import get_handler
 import alteryx2dbx.handlers  # noqa: F401  — triggers registration
@@ -18,7 +19,8 @@ def main():
 @main.command()
 @click.argument("source", type=click.Path(exists=True))
 @click.option("-o", "--output", default="./output", help="Output directory")
-def convert(source, output):
+@click.option("--report", is_flag=True, default=False, help="Generate aggregate batch_report.md")
+def convert(source, output, report):
     """Convert .yxmd file(s) to Databricks notebooks."""
     source_path = Path(source)
     output_path = Path(output)
@@ -29,14 +31,28 @@ def convert(source, output):
     if not files:
         click.echo("No .yxmd files found.")
         return
+    results = []
     for f in files:
         click.echo(f"Converting: {f.name}")
         try:
             wf = parse_yxmd(f)
-            generate_notebooks(wf, output_path)
+            stats = generate_notebooks(wf, output_path)
+            results.append(stats)
             click.echo(f"  Done: {output_path / wf.name}/")
         except Exception as e:
             click.echo(f"  Error: {e}", err=True)
+            results.append({
+                "name": f.stem,
+                "tools_total": 0,
+                "tools_converted": 0,
+                "avg_confidence": 0,
+                "unsupported_tools": [],
+                "errors": [str(e)],
+            })
+    if report:
+        output_path.mkdir(parents=True, exist_ok=True)
+        generate_batch_report(output_path, results)
+        click.echo(f"Report: {output_path / 'batch_report.md'}")
     click.echo(f"\nDone. Converted {len(files)} workflow(s).")
 
 

@@ -19,7 +19,7 @@ _LOAD_TYPES = {"DbFileInput", "TextInput", "InputData"}
 _OUTPUT_TYPES = {"DbFileOutput", "OutputData", "Browse"}
 
 
-def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> None:
+def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     """Generate the full 4-notebook Databricks bundle for *workflow*.
 
     Creates ``output_dir/<workflow.name>/`` containing:
@@ -83,6 +83,18 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> None:
 
     # 11. Report
     generate_report(wf_dir, workflow.tools, steps, execution_order)
+
+    # 12. Return stats for batch report
+    return {
+        "name": workflow.name,
+        "tools_total": len(steps),
+        "tools_converted": sum(1 for s in steps.values() if s.confidence > 0),
+        "avg_confidence": sum(s.confidence for s in steps.values()) / len(steps) if steps else 0,
+        "unsupported_tools": [
+            workflow.tools[tid].tool_type for tid, s in steps.items() if s.confidence == 0
+        ],
+        "errors": [],
+    }
 
 
 # ── Private helpers ──────────────────────────────────────────────────
