@@ -18,7 +18,7 @@ class OutputDataHandler(ToolHandler):
     def convert(self, tool: AlteryxTool, input_df_names: list[str] | None = None) -> GeneratedStep:
         input_df = input_df_names[0] if input_df_names else "df_unknown"
         config = tool.config
-        file_path = config.get("File", config.get("file", "UNKNOWN_PATH"))
+        file_path = config.get("file_path", config.get("File", config.get("file", "UNKNOWN_PATH")))
         file_format_code = config.get("FormatType", config.get("FileFormat", "0"))
         fmt = _FORMAT_MAP.get(str(file_format_code), "csv")
 

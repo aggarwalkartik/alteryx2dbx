@@ -1,0 +1,129 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2024.1">
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.DbFileInput.DbFileInput">
+        <Position x="78" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <File FileFormat="19">\\server\data\customers.xlsx</File>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Customers</Name></Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="customer_id" size="10" type="V_WString"/>
+            <Field name="name" size="254" type="V_WString"/>
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxDbFileInput"/>
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.DbFileInput.DbFileInput">
+        <Position x="78" y="198"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <File FileFormat="0">\\server\data\orders.csv</File>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Orders</Name></Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="order_id" size="10" type="V_WString"/>
+            <Field name="customer_id" size="10" type="V_WString"/>
+            <Field name="amount" type="Double"/>
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxDbFileInput"/>
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Join.Join">
+        <Position x="258" y="138"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <JoinByRecordPos value="False"/>
+          <JoinInfo connection="Left">
+            <Field left="customer_id" right="customer_id"/>
+          </JoinInfo>
+          <SelectConfiguration>
+            <Configuration outputConnection="Join"/>
+          </SelectConfiguration>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Join Customers Orders</Name></Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxJoin"/>
+    </Node>
+    <Node ToolID="4">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Summarize.Summarize">
+        <Position x="438" y="138"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <SummarizeFields>
+            <SummarizeField field="customer_id" action="GroupBy" rename="customer_id"/>
+            <SummarizeField field="name" action="First" rename="name"/>
+            <SummarizeField field="amount" action="Sum" rename="total_amount"/>
+          </SummarizeFields>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Sum by Customer</Name></Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSummarize"/>
+    </Node>
+    <Node ToolID="5">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Sort.Sort">
+        <Position x="558" y="138"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <SortInfo>
+            <Field field="total_amount" order="Descending"/>
+          </SortInfo>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Sort by Total</Name></Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSort"/>
+    </Node>
+    <Node ToolID="6">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.DbFileOutput.DbFileOutput">
+        <Position x="678" y="138"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <File FileFormat="19">\\server\output\customer_totals.xlsx</File>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Output Report</Name></Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxDbFileOutput"/>
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="1" Connection="Output"/>
+      <Destination ToolID="3" Connection="Left"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="2" Connection="Output"/>
+      <Destination ToolID="3" Connection="Right"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="3" Connection="Join"/>
+      <Destination ToolID="4" Connection="Input"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="4" Connection="Output"/>
+      <Destination ToolID="5" Connection="Input"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="5" Connection="Output"/>
+      <Destination ToolID="6" Connection="Input"/>
+    </Connection>
+  </Connections>
+  <Properties>
+    <MetaInfo>
+      <Name>join_workflow</Name>
+    </MetaInfo>
+  </Properties>
+</AlteryxDocument>
