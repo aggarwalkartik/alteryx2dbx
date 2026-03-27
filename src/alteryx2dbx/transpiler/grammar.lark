@@ -1,0 +1,99 @@
+// Alteryx Expression Grammar
+// Uses Earley parser for ambiguity handling
+
+// Entry point
+start: expr
+
+// Precedence (low to high): OR → AND → NOT → comparison → add/sub → mul/div → unary → atom
+
+?expr: or_expr
+
+?or_expr: and_expr
+    | or_expr OR and_expr       -> or_expr
+
+?and_expr: not_expr
+    | and_expr AND not_expr     -> and_expr
+
+?not_expr: comparison
+    | NOT not_expr              -> not_expr
+
+?comparison: add_expr
+    | add_expr EQ add_expr      -> eq
+    | add_expr EQEQ add_expr   -> eq
+    | add_expr NEQ add_expr     -> neq
+    | add_expr LTGT add_expr    -> neq
+    | add_expr GT add_expr      -> gt
+    | add_expr GTE add_expr     -> gte
+    | add_expr LT add_expr      -> lt
+    | add_expr LTE add_expr     -> lte
+
+?add_expr: mul_expr
+    | add_expr "+" mul_expr     -> add
+    | add_expr "-" mul_expr     -> sub
+
+?mul_expr: unary_expr
+    | mul_expr "*" unary_expr   -> mul
+    | mul_expr "/" unary_expr   -> div
+    | mul_expr "%" unary_expr   -> mod
+
+?unary_expr: atom
+    | "-" atom                  -> neg
+
+?atom: NUMBER                   -> number
+    | STRING                    -> string
+    | BOOL                      -> boolean
+    | ROW_REF                   -> row_ref
+    | FIELD_REF                 -> field_ref
+    | NULL_FUNC                 -> null_func
+    | if_expr
+    | func_call
+    | "(" expr ")"
+
+// IF / ELSEIF / ELSE / ENDIF
+if_expr: IF expr THEN expr elseif_clause* ELSE expr ENDIF
+
+elseif_clause: ELSEIF expr THEN expr
+
+// Function calls
+func_call: FUNC_NAME "(" func_args? ")"
+
+func_args: expr ("," expr)*
+
+// === Operators ===
+EQ: "="
+EQEQ: "=="
+NEQ: "!="
+LTGT: "<>"
+GT.1: ">"
+GTE.2: ">="
+LT.1: "<"
+LTE.2: "<="
+
+// === Keywords (case-insensitive) ===
+IF: /[Ii][Ff]/
+THEN: /[Tt][Hh][Ee][Nn]/
+ELSE.2: /[Ee][Ll][Ss][Ee]/
+ELSEIF.3: /[Ee][Ll][Ss][Ee][Ii][Ff]/
+ENDIF: /[Ee][Nn][Dd][Ii][Ff]/
+AND: /[Aa][Nn][Dd]/ | "&&"
+OR: /[Oo][Rr]/ | "||"
+NOT: /[Nn][Oo][Tt]/ | "!"
+
+// === Literals ===
+BOOL.2: /[Tt][Rr][Uu][Ee]/ | /[Ff][Aa][Ll][Ss][Ee]/
+NULL_FUNC.2: /[Nn][Uu][Ll][Ll]\(\)/
+
+NUMBER: /\d+(\.\d+)?/
+
+STRING: /\"[^\"]*\"/ | /'[^']*'/
+
+// === Field references ===
+ROW_REF.3: /\[Row-\d+:[^\]]+\]/
+FIELD_REF.1: /\[[^\]]+\]/
+
+// === Function name ===
+FUNC_NAME.0: /[A-Za-z_][A-Za-z0-9_]*/
+
+// Whitespace
+%import common.WS
+%ignore WS
