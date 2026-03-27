@@ -180,6 +180,10 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
         _extract_multi_row_formula_config(config_el, config)
     elif tool_type == "MultiFieldFormula":
         _extract_multi_field_formula_config(config_el, config)
+    elif tool_type == "TextInput":
+        _extract_text_input_config(config_el, config)
+    elif tool_type == "DynamicInput":
+        _extract_file_config(config_el, config)
 
     return config
 
@@ -560,6 +564,23 @@ def _extract_multi_field_formula_config(config_el: ET.Element, config: dict) -> 
             fields.append(fname)
     if fields:
         config["mff_fields"] = fields
+
+
+def _extract_text_input_config(config_el: ET.Element, config: dict) -> None:
+    """Extract TextInput inline data (fields + rows)."""
+    fields_el = config_el.find("Fields")
+    if fields_el is not None:
+        config["ti_fields"] = [f.get("name", "") for f in fields_el.findall("Field")]
+
+    data: list[list[str]] = []
+    data_el = config_el.find("Data")
+    if data_el is not None:
+        for row in data_el.findall("r"):
+            row_data = []
+            for cell in row.findall("c"):
+                row_data.append(cell.text or "")
+            data.append(row_data)
+    config["ti_data"] = data
 
 
 def _extract_fields(node: ET.Element) -> list[AlteryxField]:
