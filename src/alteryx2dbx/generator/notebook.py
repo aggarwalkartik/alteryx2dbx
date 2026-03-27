@@ -1,6 +1,7 @@
 """Main orchestrator — generates Databricks notebook bundle from an AlteryxWorkflow."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from alteryx2dbx.parser.models import AlteryxWorkflow, GeneratedStep
@@ -12,6 +13,7 @@ from .config import generate_config
 from .validator import generate_validator
 from .report import generate_report
 
+logger = logging.getLogger(__name__)
 
 _LOAD_TYPES = {"DbFileInput", "TextInput", "InputData"}
 _OUTPUT_TYPES = {"DbFileOutput", "OutputData", "Browse"}
@@ -48,28 +50,69 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> None:
         step = handler.convert(tool, input_df_names=input_dfs or None)
         steps[tool_id] = step
 
-    # 4. Classify steps
+    # 4. Insert fan-out cache hints for shared DataFrames
+    _insert_cache_hints(workflow, steps)
+
+    # 5. Detect network paths and add warnings
+    _detect_network_paths(steps)
+
+    # 6. Classify steps
     load_ids = [tid for tid in execution_order if workflow.tools[tid].tool_type in _LOAD_TYPES]
     output_ids = [tid for tid in execution_order if workflow.tools[tid].tool_type in _OUTPUT_TYPES]
     transform_ids = [tid for tid in execution_order if tid not in load_ids and tid not in output_ids]
 
-    # 5. Write notebooks
-    _write_notebook(wf_dir / "01_load_sources.py", f"01 — Load Sources: {workflow.name}", load_ids, steps)
-    _write_notebook(wf_dir / "02_transformations.py", f"02 — Transformations: {workflow.name}", transform_ids, steps)
-    _write_orchestrator(wf_dir / "03_orchestrate.py", workflow.name, output_ids, steps)
+    # 7. Write notebooks
+    load_path = wf_dir / "01_load_sources.py"
+    transform_path = wf_dir / "02_transformations.py"
+    orchestrator_path = wf_dir / "03_orchestrate.py"
 
-    # 6. Validator
+    _write_notebook(load_path, f"01 — Load Sources: {workflow.name}", load_ids, steps)
+    _write_notebook(transform_path, f"02 — Transformations: {workflow.name}", transform_ids, steps)
+    _write_orchestrator(orchestrator_path, workflow.name, output_ids, steps)
+
+    # 8. Syntax-validate generated notebooks
+    for nb_path in (load_path, transform_path, orchestrator_path):
+        _validate_syntax(nb_path)
+
+    # 9. Validator
     last_output_df = steps[output_ids[-1]].output_df if output_ids else "df_result"
     generate_validator(wf_dir, last_output_df)
 
-    # 7. Config
+    # 10. Config
     generate_config(workflow, wf_dir)
 
-    # 8. Report
+    # 11. Report
     generate_report(wf_dir, workflow.tools, steps, execution_order)
 
 
 # ── Private helpers ──────────────────────────────────────────────────
+
+
+def _resolve_source_df_name(source_tool_id: int, source_anchor: str) -> str:
+    """Derive the df variable name from a connection's source tool and anchor.
+
+    Dual-output tools use anchor names to distinguish their outputs:
+    - Filter: True / False
+    - Unique: Unique (U) / Duplicates (D)
+    - Join: Join (J) / Left (L) / Right (R)
+    """
+    anchor = source_anchor.lower()
+    if anchor in ("true",):
+        return f"df_{source_tool_id}_true"
+    elif anchor in ("false",):
+        return f"df_{source_tool_id}_false"
+    elif anchor in ("unique", "u"):
+        return f"df_{source_tool_id}_unique"
+    elif anchor in ("duplicates", "d"):
+        return f"df_{source_tool_id}_duplicates"
+    elif anchor in ("join", "j"):
+        return f"df_{source_tool_id}_joined"
+    elif anchor in ("left", "l"):
+        return f"df_{source_tool_id}_left_only"
+    elif anchor in ("right", "r"):
+        return f"df_{source_tool_id}_right_only"
+    else:
+        return f"df_{source_tool_id}"
 
 
 def _build_input_map(workflow: AlteryxWorkflow) -> dict[int, list[str]]:
@@ -81,13 +124,7 @@ def _build_input_map(workflow: AlteryxWorkflow) -> dict[int, list[str]]:
     # First pass: collect all inputs with their target anchor info
     raw_inputs: dict[int, list[tuple[str, str]]] = {}  # tool_id → [(df_name, target_anchor)]
     for conn in workflow.connections:
-        source_anchor = conn.source_anchor
-        if source_anchor.lower() == "true":
-            df_name = f"df_{conn.source_tool_id}_true"
-        elif source_anchor.lower() == "false":
-            df_name = f"df_{conn.source_tool_id}_false"
-        else:
-            df_name = f"df_{conn.source_tool_id}"
+        df_name = _resolve_source_df_name(conn.source_tool_id, conn.source_anchor)
         raw_inputs.setdefault(conn.target_tool_id, []).append((df_name, conn.target_anchor))
 
     # Second pass: order inputs correctly for dual-input tools
@@ -191,3 +228,44 @@ def _write_orchestrator(
     lines.append("")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+def _insert_cache_hints(workflow: AlteryxWorkflow, steps: dict[int, GeneratedStep]) -> None:
+    """Append .cache() to DataFrames that fan out to 2+ downstream tools."""
+    usage_count: dict[str, int] = {}
+    for conn in workflow.connections:
+        df_name = _resolve_source_df_name(conn.source_tool_id, conn.source_anchor)
+        usage_count[df_name] = usage_count.get(df_name, 0) + 1
+
+    for df_name, count in usage_count.items():
+        if count >= 2:
+            # Extract tool_id from df_name (format: df_{id} or df_{id}_{suffix})
+            parts = df_name.split("_")
+            try:
+                tool_id = int(parts[1])
+            except (ValueError, IndexError):
+                continue
+            if tool_id in steps:
+                steps[tool_id].code += (
+                    f"\n{df_name}.cache()  # Fan-out: used by {count} downstream tools"
+                )
+
+
+def _validate_syntax(path: Path) -> bool:
+    """Compile-check a generated .py file and log a warning on syntax errors."""
+    code = path.read_text(encoding="utf-8")
+    try:
+        compile(code, str(path), "exec")
+        return True
+    except SyntaxError as e:
+        logger.warning("Syntax error in %s line %s: %s", path.name, e.lineno, e.msg)
+        return False
+
+
+def _detect_network_paths(steps: dict[int, GeneratedStep]) -> None:
+    """Flag steps whose generated code references UNC / network paths."""
+    for _tid, step in steps.items():
+        if "\\\\" in step.code or "\\\\server" in step.code.lower():
+            step.notes.append(
+                "Network path detected — update to Databricks-accessible location (DBFS, S3, ADLS)"
+            )
