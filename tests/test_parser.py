@@ -73,3 +73,53 @@ def test_parse_nonexistent_file_raises():
     import pytest
     with pytest.raises(FileNotFoundError):
         parse_yxmd(Path("nonexistent.yxmd"))
+
+
+# --- Regression tests for bug fixes ---
+
+
+def test_parse_file_format_extracted():
+    """Bug fix: FileFormat attribute must be extracted from File element."""
+    wf = parse_yxmd(FIXTURES / "simple_filter.yxmd")
+    input_tool = wf.tools[1]
+    assert input_tool.config.get("FileFormat") == "19"  # Excel
+
+
+def test_parse_join_fields_extracted():
+    """Bug fix: Join fields must extract left/right attributes."""
+    wf = parse_yxmd(FIXTURES / "join_workflow.yxmd")
+    join_tool = wf.tools[3]
+    assert "join_fields" in join_tool.config
+    assert len(join_tool.config["join_fields"]) == 1
+    jf = join_tool.config["join_fields"][0]
+    assert jf["left"] == "customer_id"
+    assert jf["right"] == "customer_id"
+
+
+def test_parse_sort_fields_extracted():
+    """Bug fix: Sort fields must be stored as sort_fields (not sort_info)."""
+    wf = parse_yxmd(FIXTURES / "join_workflow.yxmd")
+    sort_tool = wf.tools[5]
+    assert "sort_fields" in sort_tool.config
+    assert len(sort_tool.config["sort_fields"]) == 1
+    sf = sort_tool.config["sort_fields"][0]
+    assert sf["field"] == "total_amount"
+    assert sf["order"] == "Descending"
+
+
+def test_parse_summarize_fields_extracted():
+    """Verify summarize fields are correctly parsed."""
+    wf = parse_yxmd(FIXTURES / "join_workflow.yxmd")
+    summarize_tool = wf.tools[4]
+    assert "summarize_fields" in summarize_tool.config
+    fields = summarize_tool.config["summarize_fields"]
+    assert len(fields) == 3
+    actions = {f["action"] for f in fields}
+    assert actions == {"GroupBy", "First", "Sum"}
+
+
+def test_parse_output_file_format_extracted():
+    """Bug fix: Output file format must also be extracted."""
+    wf = parse_yxmd(FIXTURES / "join_workflow.yxmd")
+    output_tool = wf.tools[6]
+    assert output_tool.config.get("FileFormat") == "19"

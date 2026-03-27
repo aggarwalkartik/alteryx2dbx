@@ -73,17 +73,36 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> None:
 
 
 def _build_input_map(workflow: AlteryxWorkflow) -> dict[int, list[str]]:
-    """For each tool, compute which df variable names feed into it."""
-    input_map: dict[int, list[str]] = {}
+    """For each tool, compute which df variable names feed into it.
+
+    For Join tools, inputs are ordered [left_df, right_df] based on target_anchor.
+    For Filter True/False outputs, the source anchor determines the df name suffix.
+    """
+    # First pass: collect all inputs with their target anchor info
+    raw_inputs: dict[int, list[tuple[str, str]]] = {}  # tool_id → [(df_name, target_anchor)]
     for conn in workflow.connections:
-        anchor = conn.source_anchor
-        if anchor.lower() == "true":
+        source_anchor = conn.source_anchor
+        if source_anchor.lower() == "true":
             df_name = f"df_{conn.source_tool_id}_true"
-        elif anchor.lower() == "false":
+        elif source_anchor.lower() == "false":
             df_name = f"df_{conn.source_tool_id}_false"
         else:
             df_name = f"df_{conn.source_tool_id}"
-        input_map.setdefault(conn.target_tool_id, []).append(df_name)
+        raw_inputs.setdefault(conn.target_tool_id, []).append((df_name, conn.target_anchor))
+
+    # Second pass: order inputs correctly for Join tools
+    input_map: dict[int, list[str]] = {}
+    for tool_id, inputs in raw_inputs.items():
+        tool = workflow.tools.get(tool_id)
+        if tool and tool.tool_type == "Join" and len(inputs) >= 2:
+            # Order by target_anchor: Left first, Right second
+            left_dfs = [df for df, anchor in inputs if anchor.lower() == "left"]
+            right_dfs = [df for df, anchor in inputs if anchor.lower() == "right"]
+            other_dfs = [df for df, anchor in inputs if anchor.lower() not in ("left", "right")]
+            input_map[tool_id] = left_dfs + right_dfs + other_dfs
+        else:
+            input_map[tool_id] = [df for df, _ in inputs]
+
     return input_map
 
 

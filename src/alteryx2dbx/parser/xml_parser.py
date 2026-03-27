@@ -146,7 +146,7 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
         _extract_formula_config(config_el, config)
     elif tool_type in ("Join", "FindReplace"):
         _extract_join_config(config_el, config)
-    elif tool_type == "AlteryxSelect":
+    elif tool_type in ("AlteryxSelect", "Select"):
         _extract_select_config(config_el, config)
     elif tool_type == "Summarize":
         _extract_summarize_config(config_el, config)
@@ -157,10 +157,14 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
 
 
 def _extract_file_config(config_el: ET.Element, config: dict) -> None:
-    """Extract file path from DbFileInput/DbFileOutput config."""
+    """Extract file path and format from DbFileInput/DbFileOutput config."""
     file_el = config_el.find("File")
-    if file_el is not None and file_el.text:
-        config["file_path"] = file_el.text
+    if file_el is not None:
+        if file_el.text:
+            config["file_path"] = file_el.text
+        file_format = file_el.get("FileFormat")
+        if file_format:
+            config["FileFormat"] = file_format
 
 
 def _extract_filter_config(config_el: ET.Element, config: dict) -> None:
@@ -189,16 +193,23 @@ def _extract_formula_config(config_el: ET.Element, config: dict) -> None:
 
 def _extract_join_config(config_el: ET.Element, config: dict) -> None:
     """Extract join configuration."""
-    join_info = []
+    join_fields = []
     for join_el in config_el.findall(".//JoinInfo"):
-        join_info.append({
-            "connection": join_el.get("connection", ""),
-        })
-        field_el = join_el.find("Field")
-        if field_el is not None:
-            join_info[-1]["field"] = field_el.get("field", "")
-    if join_info:
-        config["join_info"] = join_info
+        connection = join_el.get("connection", "")
+        for field_el in join_el.findall("Field"):
+            left = field_el.get("left", "")
+            right = field_el.get("right", "")
+            if left and right:
+                join_fields.append({"left": left, "right": right})
+        # Store connection type (Left/Right indicates which side this JoinInfo describes)
+        if connection:
+            config["join_connection"] = connection
+    if join_fields:
+        config["join_fields"] = join_fields
+    # Extract join-by-record-position flag
+    by_pos = config_el.find("JoinByRecordPos")
+    if by_pos is not None:
+        config["join_by_position"] = by_pos.get("value", "False") == "True"
 
 
 def _extract_select_config(config_el: ET.Element, config: dict) -> None:
@@ -232,13 +243,16 @@ def _extract_summarize_config(config_el: ET.Element, config: dict) -> None:
 def _extract_sort_config(config_el: ET.Element, config: dict) -> None:
     """Extract sort configuration."""
     fields = []
-    for sf in config_el.findall(".//Field"):
-        fields.append({
-            "field": sf.get("field", ""),
-            "order": sf.get("order", "Ascending"),
-        })
+    # Look specifically inside SortInfo for Field elements
+    sort_info = config_el.find("SortInfo")
+    if sort_info is not None:
+        for sf in sort_info.findall("Field"):
+            fields.append({
+                "field": sf.get("field", ""),
+                "order": sf.get("order", "Ascending"),
+            })
     if fields:
-        config["sort_info"] = fields
+        config["sort_fields"] = fields
 
 
 def _extract_fields(node: ET.Element) -> list[AlteryxField]:

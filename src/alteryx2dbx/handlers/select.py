@@ -62,3 +62,4 @@ class SelectHandler(ToolHandler):
 
 
 register_type_handler("Select", SelectHandler)
+register_type_handler("AlteryxSelect", SelectHandler)
