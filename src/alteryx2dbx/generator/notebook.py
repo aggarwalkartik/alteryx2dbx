@@ -90,15 +90,19 @@ def _build_input_map(workflow: AlteryxWorkflow) -> dict[int, list[str]]:
             df_name = f"df_{conn.source_tool_id}"
         raw_inputs.setdefault(conn.target_tool_id, []).append((df_name, conn.target_anchor))
 
-    # Second pass: order inputs correctly for Join tools
+    # Second pass: order inputs correctly for dual-input tools
+    _LEFT_ANCHORS = {"left", "find", "targets", "f", "#1"}
+    _RIGHT_ANCHORS = {"right", "replace", "source", "r", "s", "#2"}
+
     input_map: dict[int, list[str]] = {}
     for tool_id, inputs in raw_inputs.items():
         tool = workflow.tools.get(tool_id)
-        if tool and tool.tool_type == "Join" and len(inputs) >= 2:
-            # Order by target_anchor: Left first, Right second
-            left_dfs = [df for df, anchor in inputs if anchor.lower() == "left"]
-            right_dfs = [df for df, anchor in inputs if anchor.lower() == "right"]
-            other_dfs = [df for df, anchor in inputs if anchor.lower() not in ("left", "right")]
+        if tool and tool.tool_type in ("Join", "FindReplace", "AppendFields") and len(inputs) >= 2:
+            # Order by target_anchor: left/find/targets first, right/replace/source second
+            left_dfs = [df for df, anchor in inputs if anchor.lower() in _LEFT_ANCHORS]
+            right_dfs = [df for df, anchor in inputs if anchor.lower() in _RIGHT_ANCHORS]
+            other_dfs = [df for df, anchor in inputs
+                         if anchor.lower() not in _LEFT_ANCHORS and anchor.lower() not in _RIGHT_ANCHORS]
             input_map[tool_id] = left_dfs + right_dfs + other_dfs
         else:
             input_map[tool_id] = [df for df, _ in inputs]
