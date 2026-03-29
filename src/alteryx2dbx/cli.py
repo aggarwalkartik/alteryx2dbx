@@ -2,6 +2,8 @@
 import click
 from pathlib import Path
 from .parser.xml_parser import parse_yxmd
+from .parser.unpacker import unpack_source
+from .manifest import serialize_manifest
 from .generator.notebook import generate_notebooks
 from .generator.batch_report import generate_batch_report
 from .dag.resolver import resolve_dag
@@ -14,6 +16,54 @@ import alteryx2dbx.handlers  # noqa: F401  — triggers registration
 def main():
     """alteryx2dbx -- Convert Alteryx workflows to PySpark Databricks notebooks."""
     pass
+
+
+@main.command()
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-o", "--output", default="./manifest.json", help="Output path (file for single, dir for batch)")
+def parse(source, output):
+    """Parse .yxmd/.yxzp file(s) to JSON manifest(s)."""
+    source_path = Path(source)
+    output_path = Path(output)
+
+    if source_path.is_file():
+        # Single file mode
+        unpacked = unpack_source(source_path)
+        try:
+            wf = parse_yxmd(unpacked.workflow_path)
+            # Store macro/asset metadata in properties
+            if unpacked.macros:
+                wf.properties["macros"] = [str(m.name) for m in unpacked.macros]
+            if unpacked.assets:
+                wf.properties["assets"] = [str(a.name) for a in unpacked.assets]
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            serialize_manifest(wf, output_path)
+            click.echo(f"Wrote {output_path}")
+        finally:
+            unpacked.cleanup()
+    else:
+        # Batch / directory mode
+        files = list(source_path.glob("**/*.yxmd")) + list(source_path.glob("**/*.yxzp"))
+        if not files:
+            click.echo("No .yxmd/.yxzp files found.")
+            return
+        output_path.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            unpacked = unpack_source(f)
+            try:
+                wf = parse_yxmd(unpacked.workflow_path)
+                if unpacked.macros:
+                    wf.properties["macros"] = [str(m.name) for m in unpacked.macros]
+                if unpacked.assets:
+                    wf.properties["assets"] = [str(a.name) for a in unpacked.assets]
+                manifest_path = output_path / f"{f.stem}.json"
+                serialize_manifest(wf, manifest_path)
+                click.echo(f"Wrote {manifest_path}")
+            except Exception as e:
+                click.echo(f"Error parsing {f.name}: {e}", err=True)
+            finally:
+                unpacked.cleanup()
+        click.echo(f"\nParsed {len(files)} workflow(s).")
 
 
 @main.command()
