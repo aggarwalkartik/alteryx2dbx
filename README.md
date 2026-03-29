@@ -1,6 +1,6 @@
 # alteryx2dbx
 
-Convert Alteryx `.yxmd` workflows to PySpark Databricks notebooks -- deterministically, without LLMs.
+Convert Alteryx `.yxmd` and `.yxzp` workflows to PySpark Databricks notebooks -- deterministically, without LLMs.
 
 ## The Problem
 
@@ -20,19 +20,40 @@ Requires Python 3.11+.
 
 ## Usage
 
-### Convert a single workflow
+### Parse a workflow to manifest
 
 ```bash
-alteryx2dbx convert workflow.yxmd -o ./output
+alteryx2dbx parse workflow.yxmd -o manifest.json        # single file
+alteryx2dbx parse workflow.yxzp -o manifest.json        # .yxzp package
+alteryx2dbx parse ./workflows/ -o ./manifests/           # batch (mixed .yxmd/.yxzp)
+```
+
+Parses the workflow XML into a JSON manifest -- an inspectable, editable intermediate representation. The manifest is the decoupling layer: parse once, generate many times.
+
+### Generate production notebooks from manifest
+
+```bash
+alteryx2dbx generate manifest.json -o ./output
+alteryx2dbx generate ./manifests/ -o ./output --report   # batch + aggregate report
+```
+
+Emits serverless-safe Databricks notebooks with `_config.py` (parameterized with widgets), `_utils.py` (standard helpers), transformation notebooks, validation, and orchestration.
+
+### Convert a single workflow (quick mode)
+
+```bash
+alteryx2dbx convert workflow.yxmd -o ./output            # v1 output
+alteryx2dbx convert workflow.yxzp -o ./output --full     # v2 serverless-safe output
 ```
 
 ### Convert a directory of workflows (batch)
 
 ```bash
 alteryx2dbx convert ./workflows/ -o ./output
+alteryx2dbx convert ./workflows/ -o ./output --full      # v2 output
 ```
 
-This recursively finds all `.yxmd` files and converts each one into its own output folder.
+This recursively finds all `.yxmd` and `.yxzp` files and converts each one into its own output folder. Use `--full` for the v2 generator (serverless-safe, production notebooks).
 
 ### Batch mode with summary report
 
@@ -50,6 +71,7 @@ When `--report` is passed, an aggregate `batch_report.md` is generated in the ou
 
 ```bash
 alteryx2dbx analyze workflow.yxmd
+alteryx2dbx analyze workflow.yxzp
 ```
 
 Prints every tool in execution order with its support status and coverage percentage. No files are written.
@@ -71,7 +93,24 @@ alteryx2dbx tools
 
 ## Output Structure
 
-Each converted workflow produces a self-contained folder:
+### v2 output (`generate` or `convert --full`)
+
+```
+output/<workflow_name>/
+    _config.py                # Databricks notebook: catalog/schema/env via widgets, source/output paths
+    _utils.py                 # Databricks notebook: log_step, null_safe_join, check_row_count, safe_cast
+    01_load_sources.py        # Databricks notebook: reads source data
+    02_transformations.py     # Databricks notebook: business logic in DAG order
+    03_write_outputs.py       # Databricks notebook: writes results to targets
+    04_validate.py            # Databricks notebook: auto-generated validation with detected keys
+    05_orchestrate.py         # Databricks notebook: %run chain (config -> utils -> load -> transform -> write)
+    manifest.json             # Parsed workflow IR (for audit trail / re-generation)
+    conversion_report.md      # Per-tool confidence, applied semantic fixes, review notes
+```
+
+The v2 output is serverless-safe (no `.cache()`, no RDDs, no global temp views) and uses `%run` chains for notebook orchestration.
+
+### v1 output (`convert` without `--full`)
 
 ```
 output/<workflow_name>/
@@ -82,16 +121,6 @@ output/<workflow_name>/
     config.yml                # Workflow metadata, source/output paths
     conversion_report.md      # Per-tool confidence scores and review notes
 ```
-
-| File | Purpose |
-|------|---------|
-| `01_load_sources.py` | One cell per input tool. Reads CSV, Excel, or Parquet into DataFrames. |
-| `02_transformations.py` | One cell per transformation tool in topological order. |
-| `03_orchestrate.py` | Runs the load and transformation notebooks via `dbutils.notebook.run`, then writes outputs. |
-| `04_validate.py` | DataComPy scaffold for comparing Alteryx output against Databricks output. |
-| `config.yml` | YAML with workflow name, version, source paths, and output paths. |
-| `conversion_report.md` | Confidence score per tool, average confidence, and count of tools needing manual review. |
-| `batch_report.md` | (With `--report`) Aggregate summary across all converted workflows. |
 
 ## Supported Tools (32 tool types)
 
@@ -175,7 +204,13 @@ Alteryx formula expressions are parsed with a Lark grammar and transpiled to PyS
 
 ## Features
 
-- **Fan-out cache hints**: DataFrames used by 2+ downstream tools automatically get `.cache()` appended
+- **.yxzp support**: Packaged Alteryx workflows (ZIP archives) are automatically extracted and parsed
+- **Serverless-safe output** (v2): No `.cache()`, no RDDs, no global temp views -- works on both Databricks serverless and classic clusters
+- **Semantic fix registry**: Known Alteryx-to-PySpark pitfalls (case-insensitive joins, null-safe equality, decimal type casting) are automatically detected and fixed
+- **Production notebook structure** (v2): `_config.py` with widget parameterization, `_utils.py` with standard helpers, `%run`-based orchestration
+- **Smart validation** (v2): Auto-detects join keys from Join/Unique tool configs, generates row count, schema, aggregate, and DataComPy comparison sections
+- **JSON manifest**: Inspectable intermediate representation between parsing and generation -- edit it, version it, re-generate from it
+- **Fan-out cache hints** (v1): DataFrames used by 2+ downstream tools automatically get `.cache()` appended
 - **Syntax validation**: All generated notebooks are compile-checked; syntax errors are logged as warnings
 - **Disabled node detection**: Tools marked as disabled in Alteryx XML are flagged with network path warnings
 - **Network path warnings**: UNC paths (`\\server\...`) in generated code are flagged for migration to DBFS/S3/ADLS
