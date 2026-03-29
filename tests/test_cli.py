@@ -63,7 +63,6 @@ def test_parse_yxmd(tmp_path):
 
 def test_parse_yxzp(tmp_path):
     """Parse a .yxzp bundle and verify manifest.json is produced."""
-    # Create a minimal .yxzp (zip containing a .yxmd)
     wf_content = MINIMAL_YXMD
     yxzp_path = tmp_path / "bundle.yxzp"
     with zipfile.ZipFile(yxzp_path, "w") as zf:
@@ -92,3 +91,13 @@ def test_parse_batch(tmp_path):
     assert result.exit_code == 0, result.output
     json_files = list(out_dir.glob("*.json"))
     assert len(json_files) == 3
+
+
+def test_analyze_yxzp(tmp_path):
+    yxzp = tmp_path / "test.yxzp"
+    with zipfile.ZipFile(yxzp, "w") as zf:
+        zf.writestr("inner.yxmd", MINIMAL_YXMD)
+    runner = CliRunner()
+    result = runner.invoke(main, ["analyze", str(yxzp)])
+    assert result.exit_code == 0
+    assert "Coverage:" in result.output
