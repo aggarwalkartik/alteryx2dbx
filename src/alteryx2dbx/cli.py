@@ -6,6 +6,7 @@ from .generator.notebook import generate_notebooks
 from .generator.batch_report import generate_batch_report
 from .dag.resolver import resolve_dag
 from .handlers.registry import get_handler
+from .parser.unpacker import unpack_source
 import alteryx2dbx.handlers  # noqa: F401  — triggers registration
 
 
@@ -27,15 +28,16 @@ def convert(source, output, report):
     if source_path.is_file():
         files = [source_path]
     else:
-        files = list(source_path.glob("**/*.yxmd"))
+        files = list(source_path.glob("**/*.yxmd")) + list(source_path.glob("**/*.yxzp"))
     if not files:
         click.echo("No .yxmd files found.")
         return
     results = []
     for f in files:
         click.echo(f"Converting: {f.name}")
+        unpacked = unpack_source(f)
         try:
-            wf = parse_yxmd(f)
+            wf = parse_yxmd(unpacked.workflow_path)
             stats = generate_notebooks(wf, output_path)
             results.append(stats)
             click.echo(f"  Done: {output_path / wf.name}/")
@@ -49,6 +51,8 @@ def convert(source, output, report):
                 "unsupported_tools": [],
                 "errors": [str(e)],
             })
+        finally:
+            unpacked.cleanup()
     if report:
         output_path.mkdir(parents=True, exist_ok=True)
         generate_batch_report(output_path, results)
@@ -61,23 +65,30 @@ def convert(source, output, report):
 def analyze(source):
     """Analyze workflow without generating code."""
     source_path = Path(source)
-    files = [source_path] if source_path.is_file() else list(source_path.glob("**/*.yxmd"))
+    if source_path.is_file():
+        files = [source_path]
+    else:
+        files = list(source_path.glob("**/*.yxmd")) + list(source_path.glob("**/*.yxzp"))
     for f in files:
-        wf = parse_yxmd(f)
-        order = resolve_dag(wf)
-        click.echo(f"\nWorkflow: {wf.name}")
-        click.echo(f"Tools: {len(wf.tools)}")
-        supported = 0
-        for tool_id in order:
-            tool = wf.tools[tool_id]
-            handler = get_handler(tool)
-            is_supported = type(handler).__name__ != "UnsupportedHandler"
-            if is_supported:
-                supported += 1
-            status = "OK" if is_supported else "UNSUPPORTED"
-            click.echo(f"  [{status}] [{tool_id}] {tool.tool_type}: {tool.annotation}")
-        pct = supported / len(wf.tools) * 100 if wf.tools else 0
-        click.echo(f"Coverage: {supported}/{len(wf.tools)} ({pct:.0f}%)")
+        unpacked = unpack_source(f)
+        try:
+            wf = parse_yxmd(unpacked.workflow_path)
+            order = resolve_dag(wf)
+            click.echo(f"\nWorkflow: {wf.name}")
+            click.echo(f"Tools: {len(wf.tools)}")
+            supported = 0
+            for tool_id in order:
+                tool = wf.tools[tool_id]
+                handler = get_handler(tool)
+                is_supported = type(handler).__name__ != "UnsupportedHandler"
+                if is_supported:
+                    supported += 1
+                status = "OK" if is_supported else "UNSUPPORTED"
+                click.echo(f"  [{status}] [{tool_id}] {tool.tool_type}: {tool.annotation}")
+            pct = supported / len(wf.tools) * 100 if wf.tools else 0
+            click.echo(f"Coverage: {supported}/{len(wf.tools)} ({pct:.0f}%)")
+        finally:
+            unpacked.cleanup()
 
 
 @main.command()
