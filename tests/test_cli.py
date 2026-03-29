@@ -93,6 +93,38 @@ def test_parse_batch(tmp_path):
     assert len(json_files) == 3
 
 
+def test_generate_from_manifest(tmp_path):
+    """Generate production notebooks from a manifest.json."""
+    manifest = {
+        "name": "gen_test", "version": "2024.1",
+        "tools": {
+            "1": {"tool_id": 1, "plugin": "AlteryxBasePluginsGui.DbFileInput.DbFileInput",
+                  "tool_type": "DbFileInput", "config": {"file_path": "input.csv"},
+                  "annotation": "Input", "input_fields": [], "output_fields": []},
+            "2": {"tool_id": 2, "plugin": "AlteryxBasePluginsGui.Filter.Filter",
+                  "tool_type": "Filter", "config": {"expression": "[Revenue] > 1000"},
+                  "annotation": "Filter", "input_fields": [], "output_fields": []},
+            "3": {"tool_id": 3, "plugin": "AlteryxBasePluginsGui.DbFileOutput.DbFileOutput",
+                  "tool_type": "DbFileOutput", "config": {"file_path": "output.csv"},
+                  "annotation": "Output", "input_fields": [], "output_fields": []},
+        },
+        "connections": [
+            {"source_tool_id": 1, "source_anchor": "Output", "target_tool_id": 2, "target_anchor": "Input"},
+            {"source_tool_id": 2, "source_anchor": "True", "target_tool_id": 3, "target_anchor": "Input"},
+        ],
+        "properties": {},
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    out_dir = tmp_path / "output"
+    runner = CliRunner()
+    result = runner.invoke(main, ["generate", str(manifest_path), "-o", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "gen_test" / "_config.py").exists()
+    assert (out_dir / "gen_test" / "_utils.py").exists()
+    assert (out_dir / "gen_test" / "05_orchestrate.py").exists()
+
+
 def test_analyze_yxzp(tmp_path):
     yxzp = tmp_path / "test.yxzp"
     with zipfile.ZipFile(yxzp, "w") as zf:

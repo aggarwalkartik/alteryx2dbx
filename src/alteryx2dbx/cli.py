@@ -3,12 +3,12 @@ import click
 from pathlib import Path
 from .parser.xml_parser import parse_yxmd
 from .parser.unpacker import unpack_source
-from .manifest import serialize_manifest
+from .manifest import serialize_manifest, load_manifest
 from .generator.notebook import generate_notebooks
+from .generator.notebook_v2 import generate_notebooks_v2
 from .generator.batch_report import generate_batch_report
 from .dag.resolver import resolve_dag
 from .handlers.registry import get_handler
-from .parser.unpacker import unpack_source
 import alteryx2dbx.handlers  # noqa: F401  — triggers registration
 
 
@@ -71,8 +71,9 @@ def parse(source, output):
 @click.argument("source", type=click.Path(exists=True))
 @click.option("-o", "--output", default="./output", help="Output directory")
 @click.option("--report", is_flag=True, default=False, help="Generate aggregate batch_report.md")
-def convert(source, output, report):
-    """Convert .yxmd file(s) to Databricks notebooks."""
+@click.option("--full", is_flag=True, default=False, help="Use v2 generator (serverless-safe, production notebooks)")
+def convert(source, output, report, full):
+    """Convert .yxmd/.yxzp file(s) to Databricks notebooks."""
     source_path = Path(source)
     output_path = Path(output)
     if source_path.is_file():
@@ -80,7 +81,7 @@ def convert(source, output, report):
     else:
         files = list(source_path.glob("**/*.yxmd")) + list(source_path.glob("**/*.yxzp"))
     if not files:
-        click.echo("No .yxmd files found.")
+        click.echo("No .yxmd or .yxzp files found.")
         return
     results = []
     for f in files:
@@ -88,7 +89,7 @@ def convert(source, output, report):
         unpacked = unpack_source(f)
         try:
             wf = parse_yxmd(unpacked.workflow_path)
-            stats = generate_notebooks(wf, output_path)
+            stats = generate_notebooks_v2(wf, output_path) if full else generate_notebooks(wf, output_path)
             results.append(stats)
             click.echo(f"  Done: {output_path / wf.name}/")
         except Exception as e:
@@ -108,6 +109,47 @@ def convert(source, output, report):
         generate_batch_report(output_path, results)
         click.echo(f"Report: {output_path / 'batch_report.md'}")
     click.echo(f"\nDone. Converted {len(files)} workflow(s).")
+
+
+@main.command()
+@click.argument("manifest", type=click.Path(exists=True))
+@click.option("-o", "--output", default="./output", help="Output directory")
+@click.option("--report", is_flag=True, default=False, help="Generate aggregate batch_report.md")
+def generate(manifest, output, report):
+    """Generate production notebooks from manifest.json."""
+    manifest_path = Path(manifest)
+    output_path = Path(output)
+
+    if manifest_path.is_file():
+        manifests = [manifest_path]
+    else:
+        manifests = list(manifest_path.glob("**/*.json"))
+
+    if not manifests:
+        click.echo("No manifest files found.")
+        return
+
+    results = []
+    for m in manifests:
+        click.echo(f"Generating: {m.name}")
+        try:
+            wf = load_manifest(m)
+            stats = generate_notebooks_v2(wf, output_path)
+            results.append(stats)
+            click.echo(f"  Done: {output_path / wf.name}/")
+        except Exception as e:
+            click.echo(f"  Error: {e}", err=True)
+            results.append({
+                "name": m.stem, "tools_total": 0, "tools_converted": 0,
+                "avg_confidence": 0, "unsupported_tools": [], "errors": [str(e)],
+            })
+
+    if report:
+        output_path.mkdir(parents=True, exist_ok=True)
+        generate_batch_report(output_path, results)
+        click.echo(f"Report: {output_path / 'batch_report.md'}")
+
+    click.echo(f"\nDone. Generated {len(manifests)} workflow(s).")
 
 
 @main.command()
