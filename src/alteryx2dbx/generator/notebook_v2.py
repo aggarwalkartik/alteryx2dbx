@@ -8,6 +8,7 @@ from pathlib import Path
 from alteryx2dbx.parser.models import AlteryxWorkflow, GeneratedStep
 from alteryx2dbx.dag.resolver import resolve_dag
 from alteryx2dbx.handlers.registry import get_handler
+from alteryx2dbx.fixes import apply_fixes
 import alteryx2dbx.handlers  # noqa: F401  — triggers handler registration
 
 from .config_notebook import generate_config_notebook
@@ -53,6 +54,23 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
         input_dfs = input_map.get(tool_id, [])
         step = handler.convert(tool, input_df_names=input_dfs or None)
         steps[tool_id] = step
+
+    # 3b. Apply semantic fixes
+    for tool_id in execution_order:
+        tool = workflow.tools[tool_id]
+        step = steps[tool_id]
+        context = {
+            "tool_type": tool.tool_type,
+            **tool.config,
+            "output_fields": [
+                {"name": f.name, "type": f.type, "size": f.size, "scale": f.scale}
+                for f in tool.output_fields
+            ],
+        }
+        fix_result = apply_fixes(step.code, context)
+        step.code = fix_result.code
+        for fix in fix_result.applied_fixes:
+            step.notes.append(f"Fix applied: {fix['fix_id']} — {fix['description']}")
 
     # 4. Insert temp view hints (instead of .cache()) for fan-out DataFrames
     _insert_temp_view_hints(workflow, steps)

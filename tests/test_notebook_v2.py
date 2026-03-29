@@ -117,6 +117,34 @@ def test_temp_view_hints_for_fanout(tmp_path: Path):
         assert ".cache()" not in content, f".cache() found in {py_file.name}"
 
 
+def test_conversion_report_exists(tmp_path: Path):
+    """Conversion report should be generated."""
+    wf = AlteryxWorkflow(
+        name="fix_test",
+        version="2024.1",
+        tools={
+            1: AlteryxTool(
+                tool_id=1,
+                plugin="AlteryxBasePluginsGui.DbFileInput.DbFileInput",
+                tool_type="DbFileInput",
+                config={"file_path": "a.csv"},
+                annotation="A",
+            ),
+            2: AlteryxTool(
+                tool_id=2,
+                plugin="AlteryxBasePluginsGui.DbFileOutput.DbFileOutput",
+                tool_type="DbFileOutput",
+                config={"file_path": "out.csv"},
+                annotation="Out",
+            ),
+        },
+        connections=[AlteryxConnection(1, "Output", 2, "Input")],
+    )
+    generate_notebooks_v2(wf, tmp_path)
+    report = (tmp_path / "fix_test" / "conversion_report.md").read_text()
+    assert "Conversion Report" in report
+
+
 def test_returns_stats_dict(tmp_path: Path):
     """generate_notebooks_v2 returns a stats dict with expected keys."""
     wf = _simple_workflow()
