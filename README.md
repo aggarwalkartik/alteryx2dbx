@@ -67,6 +67,44 @@ When `--report` is passed, an aggregate `batch_report.md` is generated in the ou
 - Unsupported tool list per workflow
 - Error summary for any workflows that failed to convert
 
+### Document a workflow (migration report)
+
+```bash
+alteryx2dbx document workflow.yxmd -o ./output
+alteryx2dbx document ./workflows/ -o ./output          # batch + portfolio report
+```
+
+Generates a comprehensive `migration_report.md` with executive summary, data flow diagram (Mermaid), source/output inventory, business logic summary, and manual review checklist.
+
+**On Databricks:**
+
+```python
+%pip install -e /Workspace/Repos/your-name/alteryx2dbx
+
+# Upload your .yxmd files to a Volume, then:
+!alteryx2dbx document /Volumes/catalog/schema/workflows/ -o /Volumes/catalog/schema/output/
+```
+
+**Confluence integration (optional):**
+
+Create `.alteryx2dbx.yml` in the repo root:
+
+```yaml
+confluence:
+  url: https://company.atlassian.net
+  space: DATA-MIGRATION
+  parent_page: "Alteryx Migration Reports"
+```
+
+Set your PAT via environment variable or Databricks secret:
+
+```python
+import os
+os.environ["CONFLUENCE_PAT"] = dbutils.secrets.get("confluence", "pat")
+```
+
+When configured, `document` automatically creates Confluence **draft** pages (never publishes directly).
+
 ### Analyze a workflow (dry run)
 
 ```bash
