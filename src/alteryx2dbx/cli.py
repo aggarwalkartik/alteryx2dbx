@@ -10,6 +10,10 @@ from .generator.batch_report import generate_batch_report
 from .dag.resolver import resolve_dag
 from .handlers.registry import get_handler
 import alteryx2dbx.handlers  # noqa: F401  — triggers registration
+from .document.report import generate_migration_report
+from .document.portfolio import generate_portfolio_report
+from .document.config import load_config
+from .document.confluence import publish_draft, confluence_available, pat_setup_guide
 
 
 @click.group()
@@ -181,6 +185,88 @@ def analyze(source):
             click.echo(f"Coverage: {supported}/{len(wf.tools)} ({pct:.0f}%)")
         finally:
             unpacked.cleanup()
+
+
+@main.command()
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-o", "--output", default="./output", help="Output directory")
+@click.option("--config", "config_path", default=None, type=click.Path(), help="Path to .alteryx2dbx.yml")
+def document(source, output, config_path):
+    """Generate migration documentation for workflow(s)."""
+    source_path = Path(source)
+    output_path = Path(output)
+
+    if source_path.is_file():
+        files = [source_path]
+    else:
+        files = list(source_path.glob("**/*.yxmd")) + list(source_path.glob("**/*.yxzp"))
+
+    if not files:
+        click.echo("No .yxmd or .yxzp files found.")
+        return
+
+    config_p = Path(config_path) if config_path else None
+    config = load_config(Path.cwd(), config_path=config_p)
+
+    results = []
+    for f in files:
+        click.echo(f"Documenting: {f.name}")
+        unpacked = unpack_source(f)
+        try:
+            wf = parse_yxmd(unpacked.workflow_path)
+            wf_output = output_path / wf.name
+            report_path = generate_migration_report(wf, wf_output)
+            click.echo(f"  Report: {report_path}")
+
+            # Collect stats for portfolio
+            execution_order = resolve_dag(wf)
+            confidences = []
+            supported = 0
+            for tid in execution_order:
+                tool = wf.tools[tid]
+                handler = get_handler(tool)
+                is_supported = type(handler).__name__ != "UnsupportedHandler"
+                if is_supported:
+                    supported += 1
+                step = handler.convert(tool)
+                confidences.append(step.confidence)
+            avg_conf = sum(confidences) / len(confidences) if confidences else 0
+            readiness = "Ready" if avg_conf > 0.9 else "Needs Review" if avg_conf > 0.7 else "Significant Manual Work"
+            results.append({
+                "name": wf.name,
+                "tools_total": len(execution_order),
+                "avg_confidence": avg_conf,
+                "supported": supported,
+                "unsupported": len(execution_order) - supported,
+                "readiness": readiness,
+            })
+
+            # Confluence publishing
+            if config and config.get("confluence", {}).get("pat"):
+                if confluence_available():
+                    markdown = report_path.read_text(encoding="utf-8")
+                    try:
+                        publish_draft(config, wf.name, markdown)
+                        click.echo(f"  Confluence draft created/updated")
+                    except Exception as e:
+                        click.echo(f"  Confluence error: {e}", err=True)
+                else:
+                    click.echo("  Install confluence support: pip install alteryx2dbx[confluence]")
+        except Exception as e:
+            click.echo(f"  Error: {e}", err=True)
+        finally:
+            unpacked.cleanup()
+
+    if len(files) > 1:
+        generate_portfolio_report(output_path, results)
+        click.echo(f"Portfolio: {output_path / 'portfolio_report.md'}")
+
+    if not config:
+        click.echo("\nTip: Create .alteryx2dbx.yml to enable Confluence publishing. See README.")
+    elif not config.get("confluence", {}).get("pat"):
+        click.echo(f"\n{pat_setup_guide()}")
+
+    click.echo(f"\nDone. Documented {len(files)} workflow(s).")
 
 
 @main.command()
