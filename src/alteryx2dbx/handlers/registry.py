@@ -9,12 +9,16 @@ class HandlerRegistry:
     def __init__(self):
         self._handlers: dict[str, type[ToolHandler]] = {}
         self._type_handlers: dict[str, type[ToolHandler]] = {}
+        self._prefix_handlers: dict[str, type[ToolHandler]] = {}
 
     def register(self, plugin: str, handler_cls: type[ToolHandler]):
         self._handlers[plugin] = handler_cls
 
     def register_type(self, tool_type: str, handler_cls: type[ToolHandler]):
         self._type_handlers[tool_type] = handler_cls
+
+    def register_prefix(self, prefix: str, handler_cls: type[ToolHandler]):
+        self._prefix_handlers[prefix] = handler_cls
 
     def get(self, tool: AlteryxTool) -> ToolHandler:
         handler_cls = self._handlers.get(tool.plugin)
@@ -23,6 +27,9 @@ class HandlerRegistry:
         handler_cls = self._type_handlers.get(tool.tool_type)
         if handler_cls:
             return handler_cls()
+        for prefix, cls in self._prefix_handlers.items():
+            if tool.plugin.startswith(prefix):
+                return cls()
         return UnsupportedHandler()
 
 
@@ -39,3 +46,7 @@ def register_handler(plugin: str, handler_cls: type[ToolHandler]):
 
 def register_type_handler(tool_type: str, handler_cls: type[ToolHandler]):
     _registry.register_type(tool_type, handler_cls)
+
+
+def register_prefix_handler(prefix: str, handler_cls: type[ToolHandler]):
+    _registry.register_prefix(prefix, handler_cls)
