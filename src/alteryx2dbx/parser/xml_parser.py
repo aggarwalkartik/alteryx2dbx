@@ -103,8 +103,16 @@ def _parse_tools(root: ET.Element) -> dict[int, AlteryxTool]:
         if "ToolContainer" in plugin:
             continue
 
-        # Derive tool_type: last segment of the dotted plugin name
-        tool_type = plugin.rsplit(".", 1)[-1] if plugin else ""
+        # Derive tool_type: last segment of the dotted plugin name.
+        # Box plugins are versioned with dots (e.g. "box_input_v1.0.3") and
+        # contain no namespace prefix, so rsplit would yield just "3".
+        # Detect them by checking whether the last dotted segment looks like a
+        # version fragment (all digits) and keep the full string in that case.
+        if plugin:
+            last = plugin.rsplit(".", 1)[-1]
+            tool_type = plugin if last.isdigit() else last
+        else:
+            tool_type = ""
 
         # Extract annotation name
         annotation = _extract_annotation(node)
@@ -193,6 +201,8 @@ def _extract_config(node: ET.Element, tool_type: str) -> dict:
         _extract_text_input_config(config_el, config)
     elif tool_type == "DynamicInput":
         _extract_file_config(config_el, config)
+    elif tool_type.startswith("box_input_v") or tool_type.startswith("box_output_v"):
+        _extract_box_config(config_el, config)
 
     return config
 
@@ -590,6 +600,32 @@ def _extract_text_input_config(config_el: ET.Element, config: dict) -> None:
                 row_data.append(cell.text or "")
             data.append(row_data)
     config["ti_data"] = data
+
+
+def _extract_box_config(config_el: ET.Element, config: dict) -> None:
+    """Extract Box.com connector configuration."""
+    _simple_fields = {
+        "FilePath": "file_path",
+        "boxFileId": "box_file_id",
+        "boxParentId": "box_parent_id",
+        "fileName": "file_name",
+        "FileFormat": "file_format",
+        "authType": "auth_type",
+        "Delimiter": "delimiter",
+        "ExistingFileBehavior": "existing_file_behavior",
+    }
+    for xml_name, config_key in _simple_fields.items():
+        el = config_el.find(xml_name)
+        if el is not None and el.text:
+            config[config_key] = el.text
+
+    header_el = config_el.find("DelimitedHasHeader")
+    if header_el is not None and header_el.text:
+        config["has_header"] = header_el.text.lower() == "true"
+
+    sheet_el = config_el.find("ExcelSheetNameValues")
+    if sheet_el is not None and sheet_el.text:
+        config["excel_sheet"] = sheet_el.text
 
 
 def _extract_fields(node: ET.Element) -> list[AlteryxField]:
