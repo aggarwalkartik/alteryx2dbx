@@ -28,3 +28,4 @@ from . import multi_field_formula
 from . import text_input
 from . import browse
 from . import dynamic_input
+from . import box_input
