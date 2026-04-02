@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2024.1">
+  <Properties>
+    <MetaInfo>
+      <Name>box_workflow</Name>
+      <Author>Test Author</Author>
+      <Description>Test workflow with Box Input, Filter, and Box Output</Description>
+    </MetaInfo>
+  </Properties>
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="box_input_v1.0.3">
+        <Position x="78" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <FilePath>/data/sales.csv</FilePath>
+          <boxFileId>123456789</boxFileId>
+          <boxParentId>987654321</boxParentId>
+          <fileName>sales.csv</fileName>
+          <FileFormat>Delimited</FileFormat>
+          <DelimitedHasHeader>True</DelimitedHasHeader>
+          <Delimiter>COMMA</Delimiter>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Box Sales Input</Name></Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="region" size="254" type="V_WString"/>
+            <Field name="amount" type="Double"/>
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Filter.Filter">
+        <Position x="258" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Mode>Custom</Mode>
+          <Expression>[amount] &gt; 1000</Expression>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>High Value Filter</Name></Annotation>
+        <MetaInfo connection="True">
+          <RecordInfo>
+            <Field name="region" size="254" type="V_WString"/>
+            <Field name="amount" type="Double"/>
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="box_output_v1.0.3">
+        <Position x="438" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <FilePath>/data/output/high_value.csv</FilePath>
+          <boxFileId>111222333</boxFileId>
+          <boxParentId>444555666</boxParentId>
+          <fileName>high_value.csv</fileName>
+          <FileFormat>Delimited</FileFormat>
+          <ExistingFileBehavior>Overwrite</ExistingFileBehavior>
+        </Configuration>
+        <Annotation DisplayMode="0"><Name>Box High Value Output</Name></Annotation>
+      </Properties>
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="1" Connection="Output"/>
+      <Destination ToolID="2" Connection="Input"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="2" Connection="True"/>
+      <Destination ToolID="3" Connection="Output"/>
+    </Connection>
+  </Connections>
+</AlteryxDocument>
