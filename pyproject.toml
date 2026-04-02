@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alteryx2dbx"
-version = "0.3.0"
+version = "0.4.0"
 description = "Convert Alteryx workflows to PySpark Databricks notebooks"
 requires-python = ">=3.11"
 license = "MIT"
