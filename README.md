@@ -160,7 +160,25 @@ output/<workflow_name>/
     conversion_report.md      # Per-tool confidence scores and review notes
 ```
 
-## Supported Tools (32 tool types)
+## Box.com Connector Support
+
+Workflows that use Box Input/Output tools (marketplace add-ons) are fully supported. The generated notebooks automatically:
+
+- Download files from Box via the Box Python SDK (`boxsdk`)
+- Upload results back to Box
+- Authenticate using JWT credentials stored in Databricks Secrets
+
+When Box tools are detected, `_config.py` adds a `BOX_SECRET_SCOPE` widget and `_utils.py` includes a `get_box_client()` helper. No manual wiring needed.
+
+**Setup on Databricks:**
+
+1. Create a Box JWT application and download the JSON config
+2. Store it as a Databricks secret: `dbutils.secrets.put("box", "jwt_config", "<json>")`
+3. Run the converted notebooks -- they'll authenticate automatically
+
+Box support is format-aware: CSV, Excel, and JSON files are handled. Avro is flagged for manual implementation.
+
+## Supported Tools (34 tool types)
 
 | Alteryx Tool | PySpark Equivalent | Handler |
 |--------------|--------------------|---------|
@@ -168,6 +186,8 @@ output/<workflow_name>/
 | TextInput | `spark.createDataFrame(...)` from inline data | `TextInputHandler` |
 | DynamicInput | `spark.read` with TODO for dynamic path resolution | `DynamicInputHandler` |
 | OutputData / DbFileOutput | `df.write.format(...)` | `OutputDataHandler` |
+| Box Input | `boxsdk` download → `pd.read_csv/excel/json` → `spark.createDataFrame()` | `BoxInputHandler` |
+| Box Output | `df.toPandas()` → `boxsdk` upload | `BoxOutputHandler` |
 | Browse / BrowseV2 | `display(df)` / `df.show()` | `BrowseHandler` |
 | Filter | `df.filter(expr)` with True/False branch outputs | `FilterHandler` |
 | Formula | `df.withColumn(name, expr)` per formula field | `FormulaHandler` |
@@ -252,6 +272,8 @@ Alteryx formula expressions are parsed with a Lark grammar and transpiled to PyS
 - **Syntax validation**: All generated notebooks are compile-checked; syntax errors are logged as warnings
 - **Disabled node detection**: Tools marked as disabled in Alteryx XML are flagged with network path warnings
 - **Network path warnings**: UNC paths (`\\server\...`) in generated code are flagged for migration to DBFS/S3/ADLS
+- **Box.com connector support**: Box Input/Output tools generate `boxsdk` code with Databricks Secrets auth
+- **Migration documentation**: `document` command generates comprehensive reports with Mermaid diagrams and optional Confluence publishing
 - **Batch mode with `--report`**: Aggregate conversion report across multiple workflows
 - **Per-workflow conversion report**: Confidence scores per tool with review notes
 - **Dual-output routing**: Filter (True/False), Unique (Unique/Duplicates), Join (Join/Left/Right) outputs routed correctly through the DAG
