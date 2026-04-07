@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from alteryx2dbx.parser.models import AlteryxWorkflow, GeneratedStep
+from alteryx2dbx.parser.models import AlteryxTool, AlteryxWorkflow, GeneratedStep
+from alteryx2dbx.parser.schema_drift import detect_schema_drift, SchemaDiff
+from alteryx2dbx.parser.column_tracker import detect_column_mismatches
 from alteryx2dbx.dag.resolver import resolve_dag
 from alteryx2dbx.handlers.registry import get_handler
 from alteryx2dbx.fixes import apply_fixes
@@ -21,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 _LOAD_TYPES = {"DbFileInput", "TextInput", "InputData"}
 _OUTPUT_TYPES = {"DbFileOutput", "OutputData", "Browse"}
+
+
+def _has_box_tools(workflow: AlteryxWorkflow) -> bool:
+    return any(
+        t.plugin.startswith("box_input_v") or t.plugin.startswith("box_output_v")
+        for t in workflow.tools.values()
+    )
 
 
 def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
@@ -78,9 +87,36 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     # 5. Detect network paths and add warnings
     _detect_network_paths(steps)
 
+    # 5b. Schema drift detection
+    schema_warnings: list[SchemaDiff] = []
+    for tid in execution_order:
+        tool = workflow.tools.get(tid)
+        if tool and tool.output_fields and "select_fields" in tool.config:
+            diff = detect_schema_drift(tid, tool.output_fields, tool.config["select_fields"])
+            if diff.has_drift:
+                schema_warnings.append(diff)
+                if tid in steps:
+                    steps[tid].notes.append(
+                        f"Schema drift: +{len(diff.added)} new, -{len(diff.removed)} missing, ~{len(diff.type_changed)} type changes"
+                    )
+
+    # 5c. Column mapping — detect stale references by walking the DAG
+    column_warnings = detect_column_mismatches(workflow, execution_order)
+    for warning in column_warnings:
+        if warning.tool_id in steps:
+            steps[warning.tool_id].notes.append(f"STALE_REF: {warning.detail}")
+
     # 6. Classify steps
-    load_ids = [tid for tid in execution_order if workflow.tools[tid].tool_type in _LOAD_TYPES]
-    output_ids = [tid for tid in execution_order if workflow.tools[tid].tool_type in _OUTPUT_TYPES]
+    load_ids = [
+        tid for tid in execution_order
+        if workflow.tools[tid].tool_type in _LOAD_TYPES
+        or workflow.tools[tid].plugin.startswith("box_input_v")
+    ]
+    output_ids = [
+        tid for tid in execution_order
+        if workflow.tools[tid].tool_type in _OUTPUT_TYPES
+        or workflow.tools[tid].plugin.startswith("box_output_v")
+    ]
     transform_ids = [tid for tid in execution_order if tid not in load_ids and tid not in output_ids]
 
     # 7. Write notebooks
@@ -89,9 +125,9 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     output_path = wf_dir / "03_write_outputs.py"
     orchestrator_path = wf_dir / "05_orchestrate.py"
 
-    _write_notebook(load_path, f"01 — Load Sources: {workflow.name}", load_ids, steps)
-    _write_notebook(transform_path, f"02 — Transformations: {workflow.name}", transform_ids, steps)
-    _write_notebook(output_path, f"03 — Write Outputs: {workflow.name}", output_ids, steps)
+    _write_notebook(load_path, f"01 — Load Sources: {workflow.name}", load_ids, steps, workflow.tools)
+    _write_notebook(transform_path, f"02 — Transformations: {workflow.name}", transform_ids, steps, workflow.tools)
+    _write_notebook(output_path, f"03 — Write Outputs: {workflow.name}", output_ids, steps, workflow.tools)
     _write_orchestrator(orchestrator_path, workflow.name)
 
     # 8. Syntax-validate generated notebooks
@@ -99,10 +135,11 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
         _validate_syntax(nb_path)
 
     # 9. Config notebook
-    generate_config_notebook(workflow, wf_dir)
+    has_box = _has_box_tools(workflow)
+    generate_config_notebook(workflow, wf_dir, has_box=has_box)
 
     # 10. Utils notebook
-    generate_utils_notebook(wf_dir)
+    generate_utils_notebook(wf_dir, has_box=has_box)
 
     # 11. Validator v2
     generate_validator_v2(wf_dir, workflow, steps, execution_order)
@@ -111,9 +148,21 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     serialize_manifest(workflow, wf_dir / "manifest.json")
 
     # 13. Report
-    generate_report(wf_dir, workflow.tools, steps, execution_order)
+    generate_report(wf_dir, workflow.tools, steps, execution_order, schema_warnings=schema_warnings, column_warnings=column_warnings)
 
-    # 14. Return stats for batch report
+    # 14. Auto-capture lessons
+    try:
+        from alteryx2dbx.lessons.capture import auto_capture as _auto_capture
+        from alteryx2dbx.lessons.store import LessonStore as _LessonStore
+        captured = _auto_capture(workflow.name, steps, execution_order)
+        if captured:
+            store = _LessonStore()
+            for lesson in captured:
+                store.add(lesson)
+    except Exception:
+        pass  # lessons are best-effort, never block migration
+
+    # 15. Return stats for batch report
     return {
         "name": workflow.name,
         "tools_total": len(steps),
@@ -200,6 +249,7 @@ def _write_notebook(
     title: str,
     tool_ids: list[int],
     steps: dict[int, GeneratedStep],
+    tools: dict[int, AlteryxTool] | None = None,
 ) -> None:
     """Write a Databricks notebook (.py) with a cell per tool."""
     lines = ["# Databricks notebook source", f"# {title}"]
@@ -219,6 +269,15 @@ def _write_notebook(
         lines.append("")
         lines.append("# COMMAND ----------")
         lines.append("")
+        # Traceability comments
+        if tools and tid in tools:
+            tool = tools[tid]
+            lines.append(f"# Alteryx: Tool {tid} ({tool.tool_type}): {tool.annotation or 'No annotation'}")
+            if step.confidence < 1.0:
+                lines.append(f"# Confidence: {step.confidence:.0%} — review recommended")
+            if step.notes:
+                for note in step.notes:
+                    lines.append(f"# NOTE: {note}")
         lines.append(step.code)
 
     lines.append("")

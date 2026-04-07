@@ -81,3 +81,36 @@ class TestSummarizeHandler:
         handler = SummarizeHandler()
         step = handler.convert(_make_tool(), input_df_names=["df_1"])
         assert "from pyspark.sql import functions as F" in step.imports
+
+    def test_ambiguous_first_aggregation(self):
+        fields = [
+            {"field": "Region", "action": "GroupBy", "rename": ""},
+            {"field": "Name", "action": "First", "rename": "FirstName"},
+        ]
+        handler = SummarizeHandler()
+        step = handler.convert(_make_tool(summarize_fields=fields), input_df_names=["df_1"])
+        assert any("AMBIGUOUS" in n and "'First'" in n and "'Name'" in n for n in step.notes)
+
+    def test_ambiguous_last_aggregation(self):
+        fields = [
+            {"field": "Region", "action": "GroupBy", "rename": ""},
+            {"field": "Timestamp", "action": "Last", "rename": "LastTS"},
+        ]
+        handler = SummarizeHandler()
+        step = handler.convert(_make_tool(summarize_fields=fields), input_df_names=["df_1"])
+        assert any("AMBIGUOUS" in n and "'Last'" in n and "'Timestamp'" in n for n in step.notes)
+
+    def test_ambiguous_first_and_last(self):
+        fields = [
+            {"field": "A", "action": "First", "rename": "FirstA"},
+            {"field": "B", "action": "Last", "rename": "LastB"},
+        ]
+        handler = SummarizeHandler()
+        step = handler.convert(_make_tool(summarize_fields=fields), input_df_names=["df_1"])
+        ambiguous_notes = [n for n in step.notes if "AMBIGUOUS" in n]
+        assert len(ambiguous_notes) == 2
+
+    def test_no_ambiguous_notes_for_clean_summarize(self):
+        handler = SummarizeHandler()
+        step = handler.convert(_make_tool(), input_df_names=["df_1"])
+        assert not any("AMBIGUOUS" in n for n in step.notes)

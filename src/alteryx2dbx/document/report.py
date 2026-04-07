@@ -5,6 +5,8 @@ from pathlib import Path
 from datetime import date
 
 from alteryx2dbx.parser.models import AlteryxWorkflow, AlteryxTool, GeneratedStep
+from alteryx2dbx.parser.schema_drift import detect_schema_drift, SchemaDiff
+from alteryx2dbx.parser.column_tracker import detect_column_mismatches
 from alteryx2dbx.dag.resolver import resolve_dag
 from alteryx2dbx.handlers.registry import get_handler
 from alteryx2dbx.fixes import apply_fixes
@@ -34,6 +36,8 @@ def generate_migration_report(workflow: AlteryxWorkflow, output_dir: Path) -> Pa
     lines.extend(_output_inventory(workflow, execution_order))
     lines.extend(_business_logic_summary(workflow, steps, execution_order))
     lines.extend(_conversion_details(workflow, steps, execution_order))
+    lines.extend(_schema_drift_section(workflow, execution_order))
+    lines.extend(_column_mapping_section(workflow, execution_order))
     lines.extend(_review_checklist(workflow, steps, execution_order))
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -202,6 +206,44 @@ def _conversion_details(workflow, steps, execution_order):
             notes_str = "; ".join(step.notes) if step.notes else ""
             lines.append(f"| {tid} | {tool.tool_type} | {tool.annotation} | {step.confidence:.0%} | {notes_str} |")
     lines.append("")
+    return lines
+
+
+def _schema_drift_section(workflow, execution_order):
+    lines = []
+    warnings = []
+    for tid in execution_order:
+        tool = workflow.tools.get(tid)
+        if tool and tool.output_fields and "select_fields" in tool.config:
+            diff = detect_schema_drift(tid, tool.output_fields, tool.config["select_fields"])
+            if diff.has_drift:
+                warnings.append(diff)
+    if warnings:
+        lines.append("## Schema Drift Warnings")
+        lines.append("")
+        lines.append("| Tool ID | Added Fields | Removed Fields | Type Changed |")
+        lines.append("|---------|-------------|----------------|--------------|")
+        for diff in warnings:
+            added = ", ".join(diff.added) if diff.added else "-"
+            removed = ", ".join(diff.removed) if diff.removed else "-"
+            changed = ", ".join(d["field"] for d in diff.type_changed) if diff.type_changed else "-"
+            lines.append(f"| {diff.tool_id} | {added} | {removed} | {changed} |")
+        lines.append("")
+    return lines
+
+
+def _column_mapping_section(workflow, execution_order):
+    lines: list[str] = []
+    execution_order_list = list(execution_order)
+    warnings = detect_column_mismatches(workflow, execution_order_list)
+    if warnings:
+        lines.append("## Column Mapping Warnings")
+        lines.append("")
+        lines.append("| Tool ID | Field | Issue | Detail |")
+        lines.append("|---------|-------|-------|--------|")
+        for w in warnings:
+            lines.append(f"| {w.tool_id} | {w.field} | {w.issue} | {w.detail} |")
+        lines.append("")
     return lines
 
 

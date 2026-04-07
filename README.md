@@ -1,12 +1,12 @@
 # alteryx2dbx
 
-Convert Alteryx `.yxmd` and `.yxzp` workflows to PySpark Databricks notebooks -- deterministically, without LLMs.
+Convert Alteryx `.yxmd` and `.yxzp` workflows to PySpark Databricks notebooks. Deterministic, rule-based, no LLMs.
 
-## The Problem
+## Why This Exists
 
-Migrating Alteryx workflows to Databricks is a common enterprise need, but it is almost always done manually. Teams walk through each workflow, read the XML, and rewrite the logic in PySpark by hand. Some attempt to use LLMs for the translation, but LLMs hallucinate PySpark APIs, invent nonexistent functions, and silently change semantics (especially around null handling, case sensitivity, and string indexing).
+Migrating Alteryx workflows to Databricks is tedious. Teams walk through each workflow, read the XML, and rewrite the logic in PySpark by hand. Some try LLMs, but they hallucinate PySpark APIs, invent functions that don't exist, and silently change semantics around null handling, case sensitivity, and string indexing.
 
-`alteryx2dbx` parses the Alteryx XML directly, resolves the DAG, and emits deterministic PySpark through a rule-based transpiler. Every expression mapping is explicit. When something cannot be converted, it is marked as unsupported with the original XML preserved in comments -- nothing is silently dropped.
+`alteryx2dbx` takes a different approach. It parses the Alteryx XML directly, resolves the DAG, and emits PySpark through a rule-based transpiler. Every expression mapping is explicit and auditable. When something can't be converted, it's marked as unsupported with the original XML preserved in comments. Nothing is silently dropped.
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ alteryx2dbx parse workflow.yxzp -o manifest.json        # .yxzp package
 alteryx2dbx parse ./workflows/ -o ./manifests/           # batch (mixed .yxmd/.yxzp)
 ```
 
-Parses the workflow XML into a JSON manifest -- an inspectable, editable intermediate representation. The manifest is the decoupling layer: parse once, generate many times.
+Parses the workflow XML into a JSON manifest. This is an inspectable, editable intermediate representation. Parse once, generate many times.
 
 ### Generate production notebooks from manifest
 
@@ -140,7 +140,7 @@ output/<workflow_name>/
     01_load_sources.py        # Databricks notebook: reads source data
     02_transformations.py     # Databricks notebook: business logic in DAG order
     03_write_outputs.py       # Databricks notebook: writes results to targets
-    04_validate.py            # Databricks notebook: auto-generated validation with detected keys
+    04_validate.py            # Databricks notebook: 8-check validation with 3-tier verdict
     05_orchestrate.py         # Databricks notebook: %run chain (config -> utils -> load -> transform -> write)
     manifest.json             # Parsed workflow IR (for audit trail / re-generation)
     conversion_report.md      # Per-tool confidence, applied semantic fixes, review notes
@@ -174,7 +174,7 @@ When Box tools are detected, `_config.py` adds a `BOX_SECRET_SCOPE` widget and `
 
 1. Create a Box JWT application and download the JSON config
 2. Store it as a Databricks secret: `dbutils.secrets.put("box", "jwt_config", "<json>")`
-3. Run the converted notebooks -- they'll authenticate automatically
+3. Run the converted notebooks. They'll authenticate automatically.
 
 Box support is format-aware: CSV, Excel, and JSON files are handled. Avro is flagged for manual implementation.
 
@@ -263,14 +263,21 @@ Alteryx formula expressions are parsed with a Lark grammar and transpiled to PyS
 ## Features
 
 - **.yxzp support**: Packaged Alteryx workflows (ZIP archives) are automatically extracted and parsed
-- **Serverless-safe output** (v2): No `.cache()`, no RDDs, no global temp views -- works on both Databricks serverless and classic clusters
-- **Semantic fix registry**: Known Alteryx-to-PySpark pitfalls (case-insensitive joins, null-safe equality, decimal type casting) are automatically detected and fixed
+- **Serverless-safe output** (v2): No `.cache()`, no RDDs, no global temp views. Works on both Databricks serverless and classic clusters.
+- **Traceability**: Every generated code block is annotated with its source Alteryx tool ID, type, and annotation. When validation fails on a column, you can trace it straight back to the tool that produced it.
+- **9 semantic auto-fixes**: Known Alteryx-to-PySpark pitfalls are automatically detected and fixed. Includes case-insensitive joins, null-safe equality, decimal casting, COALESCE typing, safe date parsing (`TRY_TO_DATE`), safe casting (`TRY_CAST`), float64 key detection, `withColumn` loop warnings, and date placeholder clamping.
+- **8-check validation with 3-tier verdicts**: Row count, schema comparison, column order, column types, aggregates, null counts, DataComPy row-level matching, and auto-detected join keys. Results in one of three verdicts: Identical, Code Logic Verified, or Fail. Supports `VOLATILE_COLUMNS` and `KNOWN_DIFFERENCES` configs to handle expected timing differences.
+- **Schema drift detection**: Compares ODBC metadata (RecordInfo) against Select tool configs to catch stale column references before code is generated. Warnings surface in both the generated notebooks and the conversion report.
+- **Column mapping warnings**: Walks the DAG to detect `STALE_REF` fields that exist in Select configs but not in upstream tool outputs. Catches a whole class of bugs at parse time.
+- **Disambiguation hooks**: When the tool encounters ambiguous patterns (non-deterministic `First`/`Last` aggregation, missing join types, multi-table filter references), it adds specific review instructions instead of just a confidence score.
+- **Cleanse macro decoding**: Parses `<Value>` elements inside Cleanse macros to generate specific cleaning code instead of flagging them as raw XML.
+- **Learning loop**: Automatically captures migration insights (low-confidence tools, ambiguous patterns, applied fixes) and shares them across your team. On Databricks, lessons are stored in `/Workspace/Shared/alteryx2dbx/lessons.jsonl` so everyone benefits from past migrations. Includes CLI commands: `lessons add`, `lessons list`, `lessons promote`.
+- **Plugin system**: Extend the tool with custom handlers, fixes, and validation rules without forking. Plugins are discovered from Python entry points, `.alteryx2dbx.yml` config, or a local `plugins/` directory.
 - **Production notebook structure** (v2): `_config.py` with widget parameterization, `_utils.py` with standard helpers, `%run`-based orchestration
-- **Smart validation** (v2): Auto-detects join keys from Join/Unique tool configs, generates row count, schema, aggregate, and DataComPy comparison sections
-- **JSON manifest**: Inspectable intermediate representation between parsing and generation -- edit it, version it, re-generate from it
+- **Smart validation** (v2): Auto-detects join keys from Join/Unique tool configs
+- **JSON manifest**: Inspectable intermediate representation between parsing and generation. Edit it, version it, re-generate from it.
 - **Fan-out cache hints** (v1): DataFrames used by 2+ downstream tools automatically get `.cache()` appended
-- **Syntax validation**: All generated notebooks are compile-checked; syntax errors are logged as warnings
-- **Disabled node detection**: Tools marked as disabled in Alteryx XML are flagged with network path warnings
+- **Syntax validation**: All generated notebooks are compile-checked. Syntax errors are logged as warnings.
 - **Network path warnings**: UNC paths (`\\server\...`) in generated code are flagged for migration to DBFS/S3/ADLS
 - **Box.com connector support**: Box Input/Output tools generate `boxsdk` code with Databricks Secrets auth
 - **Migration documentation**: `document` command generates comprehensive reports with Mermaid diagrams and optional Confluence publishing
@@ -350,6 +357,50 @@ from . import crosstab
 ```
 
 4. Add a test fixture (`.yxmd` XML) in `tests/fixtures/` and a corresponding test.
+
+### Adding a custom fix via plugin
+
+Create a `plugins/` directory in your project root and add a `.py` file:
+
+```python
+# plugins/my_fixes.py
+def register_fixes(register_fix):
+    register_fix(
+        fix_id="my_org_date_fix",
+        description="Replace DATE_TRUNC with org-specific pattern",
+        severity="warning",
+        fn=_my_date_fix,
+        phase="date-handling",
+    )
+
+def _my_date_fix(code: str, context: dict) -> tuple[str, bool]:
+    if "DATE_TRUNC" in code:
+        return code.replace("DATE_TRUNC", "MY_ORG_DATE_TRUNC"), True
+    return code, False
+```
+
+The plugin is automatically discovered and applied during conversion. No config needed.
+
+### Lessons learned
+
+Track migration pitfalls and share them across your team:
+
+```bash
+alteryx2dbx lessons add \
+  --workflow customer_report \
+  --symptom "Join produced duplicates" \
+  --root-cause "Join keys were not unique" \
+  --fix "Added dedup before join" \
+  --category behavioral_difference
+
+alteryx2dbx lessons list                    # see all lessons
+alteryx2dbx lessons list --unpromoted       # see patterns not yet automated
+alteryx2dbx lessons promote <lesson-id>     # mark as encoded into tool rules
+```
+
+On Databricks, lessons are automatically stored in `/Workspace/Shared/alteryx2dbx/lessons.jsonl` so everyone in the workspace benefits. Locally, they live in the project directory as `lessons.jsonl`.
+
+The tool also auto-captures lessons during every conversion: low-confidence tools, ambiguous patterns, and applied fixes are logged without any manual step.
 
 ### Running tests
 

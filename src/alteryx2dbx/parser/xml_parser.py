@@ -327,6 +327,25 @@ def _extract_data_cleansing_config(config_el: ET.Element, config: dict) -> None:
     if fields:
         config["cleansing_fields"] = fields
 
+    # Decode Cleanse macro <Value> elements
+    for value_el in config_el.findall(".//Value"):
+        name = value_el.get("name", "")
+        text = value_el.text or ""
+        if name == "ColumnsToCleanse" and text:
+            config["macro_columns"] = [c.strip() for c in text.split(",") if c.strip()]
+        elif name == "UpperCase":
+            config["macro_uppercase"] = text.lower() == "true"
+        elif name == "LowerCase":
+            config["macro_lowercase"] = text.lower() == "true"
+        elif name == "TitleCase":
+            config["macro_titlecase"] = text.lower() == "true"
+        elif name == "RemoveLeadingTrailingWhitespace":
+            config["macro_trim"] = text.lower() == "true"
+        elif name == "RemoveTabsLineBreaks":
+            config["macro_remove_tabs"] = text.lower() == "true"
+        elif name == "RemoveExtraWhitespace":
+            config["macro_remove_extra_whitespace"] = text.lower() == "true"
+
 
 def _extract_find_replace_config(config_el: ET.Element, config: dict) -> None:
     """Extract FindReplace configuration."""

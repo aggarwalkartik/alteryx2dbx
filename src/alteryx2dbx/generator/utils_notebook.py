@@ -63,12 +63,32 @@ def safe_cast(df: DataFrame, col_name: str, target_type) -> DataFrame:
 '''
 
 
-def generate_utils_notebook(output_dir: Path) -> Path:
+_BOX_UTILS_TEMPLATE = r'''
+# COMMAND ----------
+
+# Box.com client — authenticated via Databricks Secrets
+import json
+from boxsdk import JWTAuth, Client
+
+def get_box_client():
+    """Return an authenticated Box client using JWT credentials from Databricks Secrets."""
+    jwt_config = json.loads(dbutils.secrets.get(BOX_SECRET_SCOPE, "jwt_config"))
+    auth = JWTAuth.from_settings_dictionary(jwt_config)
+    return Client(auth)
+
+box_client = get_box_client()
+'''
+
+
+def generate_utils_notebook(output_dir: Path, *, has_box: bool = False) -> Path:
     """Write the _utils.py Databricks notebook into *output_dir*.
 
     Returns the path to the written file.
     """
+    content = _UTILS_TEMPLATE
+    if has_box:
+        content += _BOX_UTILS_TEMPLATE
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "_utils.py"
-    path.write_text(_UTILS_TEMPLATE, encoding="utf-8")
+    path.write_text(content, encoding="utf-8")
     return path

@@ -70,3 +70,30 @@ class TestFilterHandler:
         step = handler.convert(tool, input_df_names=["df_1"])
 
         assert "from pyspark.sql import functions as F" in step.imports
+
+    def test_ambiguous_multi_table_reference(self):
+        handler = FilterHandler()
+        tool = _make_tool(expression='[Orders.Status] == "Active" && [Customers.Region] == "EU"')
+        step = handler.convert(tool, input_df_names=["df_1"])
+        assert any("AMBIGUOUS" in n and "multiple tables" in n for n in step.notes)
+
+    def test_no_ambiguous_for_simple_expression(self):
+        handler = FilterHandler()
+        tool = _make_tool(expression='[Status] == "Active"')
+        step = handler.convert(tool, input_df_names=["df_1"])
+        assert not any("AMBIGUOUS" in n for n in step.notes)
+
+    def test_no_ambiguous_dot_only_no_bracket(self):
+        handler = FilterHandler()
+        tool = _make_tool(expression='something.field == "test"')
+        step = handler.convert(tool, input_df_names=["df_1"])
+        assert not any("AMBIGUOUS" in n and "multiple tables" in n for n in step.notes)
+
+    def test_ambiguous_note_appended_to_existing_notes(self):
+        handler = FilterHandler()
+        # Use invalid expression that also has dot+bracket pattern
+        tool = _make_tool(expression='<<<[foo.bar]>>>')
+        step = handler.convert(tool, input_df_names=["df_1"])
+        # Should have both the transpilation failure note AND the ambiguous note
+        assert any("transpilation failed" in n.lower() for n in step.notes)
+        assert any("AMBIGUOUS" in n for n in step.notes)

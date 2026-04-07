@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from alteryx2dbx.parser.models import GeneratedStep, AlteryxTool
+from alteryx2dbx.parser.schema_drift import SchemaDiff
+from alteryx2dbx.parser.column_tracker import ColumnWarning
 
 
 def generate_report(
@@ -11,6 +13,8 @@ def generate_report(
     tools: dict[int, AlteryxTool],
     steps: dict[int, GeneratedStep],
     execution_order: list[int],
+    schema_warnings: list[SchemaDiff] | None = None,
+    column_warnings: list[ColumnWarning] | None = None,
 ) -> None:
     """Write conversion_report.md with summary stats and per-tool table."""
     total = len(execution_order)
@@ -42,6 +46,27 @@ def generate_report(
                 f"| {tid} | {tool.tool_type} | {tool.annotation} "
                 f"| {step.confidence:.0%} | {notes_str} |"
             )
+
+    if schema_warnings:
+        lines.append("")
+        lines.append("## Schema Drift Warnings")
+        lines.append("")
+        lines.append("| Tool ID | Added Fields | Removed Fields | Type Changed |")
+        lines.append("|---------|-------------|----------------|--------------|")
+        for diff in schema_warnings:
+            added = ", ".join(diff.added) if diff.added else "-"
+            removed = ", ".join(diff.removed) if diff.removed else "-"
+            changed = ", ".join(d["field"] for d in diff.type_changed) if diff.type_changed else "-"
+            lines.append(f"| {diff.tool_id} | {added} | {removed} | {changed} |")
+
+    if column_warnings:
+        lines.append("")
+        lines.append("## Column Mapping Warnings")
+        lines.append("")
+        lines.append("| Tool ID | Field | Issue | Detail |")
+        lines.append("|---------|-------|-------|--------|")
+        for w in column_warnings:
+            lines.append(f"| {w.tool_id} | {w.field} | {w.issue} | {w.detail} |")
 
     with open(output_dir / "conversion_report.md", "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

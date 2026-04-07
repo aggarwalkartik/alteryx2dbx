@@ -57,13 +57,22 @@ class SummarizeHandler(ToolHandler):
 
         code = "\n".join(lines)
 
+        notes: list[str] = []
+        for sf in summarize_fields:
+            field_name = sf.get("field", "")
+            action = sf.get("action", "")
+            if action == "First":
+                notes.append(f"AMBIGUOUS: 'First' aggregation on '{field_name}' has no ORDER BY — result is non-deterministic in Spark")
+            elif action == "Last":
+                notes.append(f"AMBIGUOUS: 'Last' aggregation on '{field_name}' has no ORDER BY — result is non-deterministic in Spark")
+
         return GeneratedStep(
             step_name=f"summarize_{tool.tool_id}",
             code=code,
             imports={"from pyspark.sql import functions as F"},
             input_dfs=[input_df],
             output_df=f"df_{tool.tool_id}",
-            notes=[],
+            notes=notes,
             confidence=1.0,
         )
 

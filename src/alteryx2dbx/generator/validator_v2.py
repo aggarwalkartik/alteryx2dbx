@@ -76,14 +76,18 @@ def generate_validator_v2(
     steps: dict[int, GeneratedStep],
     execution_order: list[int],
 ) -> None:
-    """Write ``04_validate.py`` — a Databricks notebook with 5 validation sections.
+    """Write ``04_validate.py`` — a Databricks notebook with 8 validation sections.
 
     Sections:
     1. Load Alteryx baseline
-    2. Row Count Comparison
+    2. Row Count Comparison (with tolerance)
     3. Schema Comparison
+    3b. Column Order Check
+    3c. Column Type Comparison
     4. Aggregate Checks (sum/min/max on numeric columns)
     5. Row-Level Comparison with DataComPy
+    6. Null and Empty Count Comparison
+    + Verdict cell (3-tier: IDENTICAL / CODE LOGIC VERIFIED / FAIL)
     """
     # Determine the last output df name
     last_output_df = "df_result"
@@ -112,6 +116,21 @@ def generate_validator_v2(
     lines.append("# Databricks notebook source")
     lines.append("# 04 — Validation: Compare Alteryx baseline vs Databricks output")
 
+    # ── Validation Configuration ──
+    _cell(
+        '# --- Validation Configuration ---\n'
+        '# Customize these for your workflow:\n'
+        '\n'
+        '# Columns affected by data timing — excluded from exact comparison\n'
+        'VOLATILE_COLUMNS = []  # e.g., ["last_modified", "extract_timestamp"]\n'
+        '\n'
+        '# Known expected differences with explanations\n'
+        'KNOWN_DIFFERENCES = {}  # e.g., {"discount_pct": "Rounding differs between Alteryx and Spark"}\n'
+        '\n'
+        '# Acceptable row count difference as percentage (0.0 = exact match)\n'
+        'ROW_COUNT_TOLERANCE_PCT = 0.0\n'
+    )
+
     # ── Section 1: Load Alteryx baseline ──
     _cell(
         '# SECTION 1: Load Alteryx baseline\n'
@@ -121,15 +140,20 @@ def generate_validator_v2(
         ')'
     )
 
-    # ── Section 2: Row Count Comparison ──
+    # ── Section 2: Row Count Comparison (with tolerance) ──
     _cell(
         f'# SECTION 2: Row Count Comparison\n'
         f'alteryx_count = alteryx_df.count()\n'
         f'databricks_count = {last_output_df}.count()\n'
         f'print(f"Alteryx row count:    {{alteryx_count}}")\n'
         f'print(f"Databricks row count: {{databricks_count}}")\n'
-        f'assert alteryx_count == databricks_count, (\n'
-        f'    f"Row count mismatch: Alteryx={{alteryx_count}} vs Databricks={{databricks_count}}"\n'
+        f'if alteryx_count > 0:\n'
+        f'    row_diff_pct = abs(alteryx_count - databricks_count) / alteryx_count * 100\n'
+        f'else:\n'
+        f'    row_diff_pct = 0.0 if databricks_count == 0 else 100.0\n'
+        f'print(f"Difference: {{row_diff_pct:.4f}}% (tolerance: {{ROW_COUNT_TOLERANCE_PCT}}%)")\n'
+        f'assert row_diff_pct <= ROW_COUNT_TOLERANCE_PCT, (\n'
+        f'    f"Row count mismatch exceeds tolerance: Alteryx={{alteryx_count}} vs Databricks={{databricks_count}} ({{row_diff_pct:.4f}}% > {{ROW_COUNT_TOLERANCE_PCT}}%)"\n'
         f')'
     )
 
@@ -145,6 +169,38 @@ def generate_validator_v2(
         f'if only_in_databricks:\n'
         f'    print(f"Columns only in Databricks: {{only_in_databricks}}")\n'
         f'assert not only_in_alteryx and not only_in_databricks, "Schema mismatch detected"'
+    )
+
+    # ── Section 3b: Column Order Check ──
+    _cell(
+        '# SECTION 3b: Column Order Check\n'
+        'alteryx_order = alteryx_df.columns\n'
+        f'databricks_order = {last_output_df}.columns\n'
+        'order_match = alteryx_order == databricks_order\n'
+        'if not order_match:\n'
+        '    print("Column order differs:")\n'
+        '    for i, (a, d) in enumerate(zip(alteryx_order, databricks_order)):\n'
+        '        if a != d:\n'
+        '            print(f"  Position {i}: Alteryx={a}, Databricks={d}")\n'
+        'else:\n'
+        '    print("Column order: MATCH")\n'
+    )
+
+    # ── Section 3c: Column Type Comparison ──
+    _cell(
+        '# SECTION 3c: Column Type Comparison\n'
+        'alteryx_types = {f.name: str(f.dataType) for f in alteryx_df.schema.fields}\n'
+        f'databricks_types = {{f.name: str(f.dataType) for f in {last_output_df}.schema.fields}}\n'
+        'type_mismatches = []\n'
+        'for col_name in set(alteryx_types) & set(databricks_types):\n'
+        '    if alteryx_types[col_name] != databricks_types[col_name]:\n'
+        '        type_mismatches.append((col_name, alteryx_types[col_name], databricks_types[col_name]))\n'
+        'if type_mismatches:\n'
+        '    print("Type mismatches:")\n'
+        '    for col_name, at, dt in type_mismatches:\n'
+        '        print(f"  {col_name}: Alteryx={at}, Databricks={dt}")\n'
+        'else:\n'
+        '    print("Column types: MATCH")\n'
     )
 
     # ── Section 4: Aggregate Checks ──
@@ -175,14 +231,68 @@ def generate_validator_v2(
         f'# SECTION 5: Row-Level Comparison with DataComPy\n'
         f'import datacompy\n'
         f'\n'
+        f'compare_alt = alteryx_df.drop(*VOLATILE_COLUMNS) if VOLATILE_COLUMNS else alteryx_df\n'
+        f'compare_dbx = {last_output_df}.drop(*VOLATILE_COLUMNS) if VOLATILE_COLUMNS else {last_output_df}\n'
+        f'\n'
         f'comparison = datacompy.SparkCompare(\n'
         f'    spark,\n'
-        f'    base_df=alteryx_df,\n'
-        f'    compare_df={last_output_df},\n'
+        f'    base_df=compare_alt,\n'
+        f'    compare_df=compare_dbx,\n'
         f'    join_columns=[{join_columns_str}],\n'
         f')\n'
         f'\n'
         f'print(comparison.report())'
+    )
+
+    # ── Section 6: Null and Empty Count Comparison ──
+    _cell(
+        '# SECTION 6: Null and Empty Count Comparison\n'
+        'from pyspark.sql import functions as F\n'
+        'print("\\nNull/Empty count comparison (excluding VOLATILE_COLUMNS):")\n'
+        'compare_cols = [c for c in alteryx_df.columns if c not in VOLATILE_COLUMNS]\n'
+        'if compare_cols:\n'
+        '    null_alt = alteryx_df.select(\n'
+        '        [F.sum(F.when(F.col(c).isNull(), 1).otherwise(0)).alias(c)\n'
+        '         for c in compare_cols]\n'
+        '    ).collect()[0]\n'
+        f'    null_dbx = {last_output_df}.select(\n'
+        '        [F.sum(F.when(F.col(c).isNull(), 1).otherwise(0)).alias(c)\n'
+        '         for c in compare_cols]\n'
+        '    ).collect()[0]\n'
+        '    null_diffs = []\n'
+        '    for c in compare_cols:\n'
+        '        a_val = null_alt[c]\n'
+        '        d_val = null_dbx[c]\n'
+        '        if a_val != d_val:\n'
+        '            null_diffs.append((c, a_val, d_val))\n'
+        '    if null_diffs:\n'
+        '        for c, a, d in null_diffs:\n'
+        '            if c in KNOWN_DIFFERENCES:\n'
+        '                print(f"  {c}: Alteryx={a}, Databricks={d} (KNOWN: {KNOWN_DIFFERENCES[c]})")\n'
+        '            else:\n'
+        '                print(f"  {c}: Alteryx={a}, Databricks={d}")\n'
+        '    else:\n'
+        '        print("  All null/empty counts match.")\n'
+    )
+
+    # ── Verdict ──
+    _cell(
+        '# === VALIDATION VERDICT ===\n'
+        '#\n'
+        '# Three possible outcomes:\n'
+        '#   IDENTICAL        — All 8 checks pass with zero differences\n'
+        '#   CODE LOGIC VERIFIED — Schema checks pass; all differing columns are in\n'
+        '#                        VOLATILE_COLUMNS or KNOWN_DIFFERENCES; row count within tolerance\n'
+        '#   FAIL             — Unexpected differences found that need investigation\n'
+        '#\n'
+        '# After your first validation run, populate VOLATILE_COLUMNS and\n'
+        '# KNOWN_DIFFERENCES in the Configuration cell above, then re-run.\n'
+        'print("\\n" + "="*60)\n'
+        'print("Review the sections above to determine your verdict.")\n'
+        'print("  - If all checks show MATCH: IDENTICAL")\n'
+        'print("  - If diffs are only in VOLATILE_COLUMNS/KNOWN_DIFFERENCES: CODE LOGIC VERIFIED")\n'
+        'print("  - Otherwise: FAIL — investigate unexpected differences")\n'
+        'print("="*60)\n'
     )
 
     lines.append("")

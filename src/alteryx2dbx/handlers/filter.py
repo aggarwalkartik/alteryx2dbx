@@ -28,6 +28,9 @@ class FilterHandler(ToolHandler):
             f"df_{tool.tool_id}_false = {input_df}.filter(~(_filter_cond_{tool.tool_id}))\n"
             f"df_{tool.tool_id} = df_{tool.tool_id}_true  # Default: True branch"
         )
+        if "." in expression and "[" in expression:
+            notes.append("AMBIGUOUS: Filter expression may reference multiple tables — verify column source after migration")
+
         return GeneratedStep(
             step_name=f"filter_{tool.annotation or tool.tool_id}".lower().replace(" ", "_"),
             code=code,

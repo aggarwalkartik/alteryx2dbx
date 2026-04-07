@@ -1,5 +1,6 @@
 """CLI entry point for alteryx2dbx."""
 import click
+from datetime import date
 from pathlib import Path
 from .parser.xml_parser import parse_yxmd
 from .parser.unpacker import unpack_source
@@ -14,6 +15,26 @@ from .document.report import generate_migration_report
 from .document.portfolio import generate_portfolio_report
 from .document.config import load_config
 from .document.confluence import publish_draft, confluence_available, pat_setup_guide
+from .lessons.models import Lesson, CATEGORIES
+from .lessons.store import LessonStore
+from .lessons.capture import auto_capture
+from .plugins.loader import discover_plugins, register_plugins
+from .fixes import register_fix
+
+
+def _load_plugins():
+    """Discover and register plugins from entry points, config, and local dir."""
+    config = {}
+    config_path = Path.cwd() / ".alteryx2dbx.yml"
+    if config_path.exists():
+        import yaml
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+
+    plugins = discover_plugins(config)
+    if plugins:
+        from .handlers.registry import _registry
+        register_plugins(plugins, handler_registry=_registry, fix_registry=register_fix)
 
 
 @click.group()
@@ -78,6 +99,7 @@ def parse(source, output):
 @click.option("--full", is_flag=True, default=False, help="Use v2 generator (serverless-safe, production notebooks)")
 def convert(source, output, report, full):
     """Convert .yxmd/.yxzp file(s) to Databricks notebooks."""
+    _load_plugins()
     source_path = Path(source)
     output_path = Path(output)
     if source_path.is_file():
@@ -121,6 +143,7 @@ def convert(source, output, report, full):
 @click.option("--report", is_flag=True, default=False, help="Generate aggregate batch_report.md")
 def generate(manifest, output, report):
     """Generate production notebooks from manifest.json."""
+    _load_plugins()
     manifest_path = Path(manifest)
     output_path = Path(output)
 
@@ -278,3 +301,64 @@ def tools():
         handler = _registry._type_handlers[tool_type]
         click.echo(f"  {tool_type} ({handler.__name__})")
     click.echo(f"\nTotal: {len(_registry._type_handlers)} tool types")
+
+
+@main.group()
+@click.option("--lessons-file", default=None, type=click.Path(), help="Path to lessons.jsonl")
+@click.pass_context
+def lessons(ctx, lessons_file):
+    """Manage migration lessons learned."""
+    ctx.ensure_object(dict)
+    ctx.obj["store"] = LessonStore(Path(lessons_file).parent if lessons_file else None)
+
+
+@lessons.command("add")
+@click.option("--workflow", required=True)
+@click.option("--symptom", required=True)
+@click.option("--root-cause", required=True)
+@click.option("--fix", required=True)
+@click.option("--category", required=True, type=click.Choice(CATEGORIES))
+@click.pass_context
+def lessons_add(ctx, workflow, symptom, root_cause, fix, category):
+    """Add a lesson from a migration experience."""
+    store = ctx.obj["store"]
+    lesson = Lesson(
+        id=Lesson.new_id(),
+        date=date.today().isoformat(),
+        workflow=workflow,
+        symptom=symptom,
+        root_cause=root_cause,
+        fix=fix,
+        category=category,
+    )
+    store.add(lesson)
+    click.echo(f"Lesson {lesson.id} added.")
+
+
+@lessons.command("list")
+@click.option("--category", default=None)
+@click.option("--unpromoted", is_flag=True)
+@click.pass_context
+def lessons_list(ctx, category, unpromoted):
+    """List recorded lessons."""
+    store = ctx.obj["store"]
+    items = store.list_all(category=category, unpromoted_only=unpromoted)
+    if not items:
+        click.echo("No lessons found.")
+        return
+    for lesson in items:
+        status = "[promoted]" if lesson.promoted else "[active]"
+        auto = " (auto)" if lesson.auto_captured else ""
+        click.echo(f"  {lesson.id} {status}{auto} [{lesson.category}] {lesson.symptom}")
+
+
+@lessons.command("promote")
+@click.argument("lesson_id")
+@click.pass_context
+def lessons_promote(ctx, lesson_id):
+    """Mark a lesson as promoted (encoded into tool rules)."""
+    store = ctx.obj["store"]
+    if store.promote(lesson_id):
+        click.echo(f"Lesson {lesson_id} promoted.")
+    else:
+        click.echo(f"Lesson {lesson_id} not found.")

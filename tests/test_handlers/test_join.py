@@ -64,3 +64,38 @@ class TestJoinHandler:
         step = handler.convert(_make_tool(join_fields=fields), input_df_names=["df_1", "df_2"])
         assert '"ID"' in step.code
         assert '"TxnDate"' in step.code
+
+    def test_ambiguous_no_join_fields(self):
+        handler = JoinHandler()
+        step = handler.convert(_make_tool(join_fields=[]), input_df_names=["df_1", "df_2"])
+        assert any("AMBIGUOUS" in n and "No join fields" in n for n in step.notes)
+
+    def test_ambiguous_no_join_type(self):
+        handler = JoinHandler()
+        tool = AlteryxTool(
+            tool_id=20,
+            plugin="AlteryxBasePluginsEngine.Join",
+            tool_type="Join",
+            config={"join_fields": [{"left": "ID", "right": "ID"}]},
+            annotation="Join Data",
+        )
+        step = handler.convert(tool, input_df_names=["df_1", "df_2"])
+        assert any("AMBIGUOUS" in n and "Join type not specified" in n for n in step.notes)
+
+    def test_no_ambiguous_notes_for_clean_join(self):
+        handler = JoinHandler()
+        step = handler.convert(_make_tool(), input_df_names=["df_1", "df_2"])
+        assert not any("AMBIGUOUS" in n for n in step.notes)
+
+    def test_ambiguous_both_missing(self):
+        handler = JoinHandler()
+        tool = AlteryxTool(
+            tool_id=20,
+            plugin="AlteryxBasePluginsEngine.Join",
+            tool_type="Join",
+            config={},
+            annotation="Join Data",
+        )
+        step = handler.convert(tool, input_df_names=["df_1", "df_2"])
+        ambiguous_notes = [n for n in step.notes if "AMBIGUOUS" in n]
+        assert len(ambiguous_notes) == 2

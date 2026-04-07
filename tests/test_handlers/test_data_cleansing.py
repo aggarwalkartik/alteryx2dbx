@@ -124,3 +124,113 @@ class TestDataCleansingHandler:
         step = handler.convert(tool, input_df_names=None)
 
         assert "df_unknown" in step.code
+
+    # --- Cleanse macro decoding tests ---
+
+    def test_macro_columns_used_as_fields(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["FirstName", "LastName"]
+        tool.config["macro_trim"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert 'withColumn("FirstName"' in step.code
+        assert 'withColumn("LastName"' in step.code
+        assert step.confidence == 0.65
+
+    def test_macro_uppercase_sets_case_and_warning(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["City"]
+        tool.config["macro_uppercase"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.upper" in step.code
+        assert any("uppercase config may be inaccurate" in n for n in step.notes)
+        assert step.confidence == 0.65
+
+    def test_macro_lowercase(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Status"]
+        tool.config["macro_lowercase"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.lower" in step.code
+
+    def test_macro_titlecase(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Name"]
+        tool.config["macro_titlecase"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.initcap" in step.code
+
+    def test_macro_trim_enables_trim(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Addr"]
+        tool.config["macro_trim"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.trim" in step.code
+
+    def test_macro_remove_tabs_enables_regexp(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Notes"]
+        tool.config["macro_remove_tabs"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.regexp_replace" in step.code
+
+    def test_macro_remove_extra_whitespace_enables_regexp(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Desc"]
+        tool.config["macro_remove_extra_whitespace"] = True
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.regexp_replace" in step.code
+
+    def test_macro_confidence_is_065(self):
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["X"]
+        step = handler.convert(tool, input_df_names=["df_1"])
+
+        assert step.confidence == 0.65
+
+    def test_non_macro_confidence_still_1(self):
+        """Existing non-macro behavior unchanged."""
+        handler = DataCleansingHandler()
+        tool = _make_tool(trim_whitespace=True, fields=["A"])
+        step = handler.convert(tool, input_df_names=["df_1"])
+
+        assert step.confidence == 1.0
+        assert step.notes == []
+
+    def test_partial_macro_config(self):
+        """Only some macro values present — others default to off."""
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = ["Col1"]
+        tool.config["macro_trim"] = True
+        # No macro_uppercase, macro_lowercase etc.
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "F.trim" in step.code
+        assert "F.upper" not in step.code
+        assert "F.lower" not in step.code
+        assert step.confidence == 0.65
+
+    def test_macro_empty_columns_falls_through_to_dynamic(self):
+        """macro_columns present but empty list — dynamic all-string path."""
+        handler = DataCleansingHandler()
+        tool = _make_tool(fields=None)
+        tool.config["macro_columns"] = []
+        step = handler.convert(tool, input_df_names=["df_5"])
+
+        assert "StringType" in step.code
+        assert step.confidence == 0.65

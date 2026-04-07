@@ -51,13 +51,19 @@ class JoinHandler(ToolHandler):
         if not conditions:
             imports.add("from pyspark.sql import functions as F")
 
+        notes: list[str] = []
+        if not join_fields:
+            notes.append("AMBIGUOUS: No join fields specified — may be cross join or join-by-position")
+        if "join_type" not in tool.config:
+            notes.append("AMBIGUOUS: Join type not specified — defaulting to inner join, verify this is correct")
+
         return GeneratedStep(
             step_name=f"join_{tid}",
             code=code,
             imports=imports,
             input_dfs=[left_df, right_df],
             output_df=f"df_{tid}",
-            notes=[],
+            notes=notes,
             confidence=1.0,
         )
 

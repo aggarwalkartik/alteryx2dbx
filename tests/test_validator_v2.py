@@ -210,7 +210,7 @@ class TestGenerateValidatorV2:
         assert "TODO_primary_key" in content
 
     def test_notebook_has_all_sections(self, tmp_path: Path):
-        """Verify all 5 validation sections are present."""
+        """Verify all 8 validation sections are present."""
         tool = AlteryxTool(
             tool_id=1,
             plugin="AlteryxBasePluginsGui.OutputData.OutputData",
@@ -230,12 +230,17 @@ class TestGenerateValidatorV2:
 
         content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
 
-        # All sections present
+        # All original sections present
         assert "Load Alteryx" in content or "baseline" in content.lower()
         assert "Row Count" in content
         assert "Schema" in content
         assert "Aggregate" in content
         assert "DataComPy" in content or "datacompy" in content
+
+        # New sections present
+        assert "SECTION 3b" in content
+        assert "SECTION 3c" in content
+        assert "SECTION 6" in content
 
     def test_aggregate_checks_on_numeric_columns(self, tmp_path: Path):
         """Aggregate section references numeric columns for sum/min/max."""
@@ -260,3 +265,155 @@ class TestGenerateValidatorV2:
         content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
         # Numeric columns should appear in aggregate checks
         assert "revenue" in content
+
+    def test_config_cell_present(self, tmp_path: Path):
+        """Config cell with VOLATILE_COLUMNS, KNOWN_DIFFERENCES, ROW_COUNT_TOLERANCE_PCT."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "VOLATILE_COLUMNS = []" in content
+        assert "KNOWN_DIFFERENCES = {}" in content
+        assert "ROW_COUNT_TOLERANCE_PCT = 0.0" in content
+
+    def test_row_count_uses_tolerance(self, tmp_path: Path):
+        """Row count section references ROW_COUNT_TOLERANCE_PCT."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        # The row count section should use tolerance, not a simple assert ==
+        assert "ROW_COUNT_TOLERANCE_PCT" in content
+        assert "row_diff_pct" in content
+
+    def test_verdict_cell_present(self, tmp_path: Path):
+        """Verdict cell has 3-tier description."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "VALIDATION VERDICT" in content
+        assert "IDENTICAL" in content
+        assert "CODE LOGIC VERIFIED" in content
+        assert "FAIL" in content
+
+    def test_column_order_check(self, tmp_path: Path):
+        """Section 3b checks column order."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "Column Order Check" in content
+        assert "order_match" in content
+
+    def test_column_type_check(self, tmp_path: Path):
+        """Section 3c checks column types."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "Column Type Comparison" in content
+        assert "type_mismatches" in content
+
+    def test_null_empty_count_section(self, tmp_path: Path):
+        """Section 6 compares null/empty counts."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "Null and Empty Count Comparison" in content
+        assert "VOLATILE_COLUMNS" in content
+        assert "KNOWN_DIFFERENCES" in content
+
+    def test_section6_uses_isNull_not_cast(self, tmp_path: Path):
+        """Section 6 uses isNull() and does not use cast('string') == ''."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        assert "isNull()" in content
+        assert 'cast("string") == ""' not in content
+
+    def test_section5_uses_volatile_columns(self, tmp_path: Path):
+        """Section 5 (DataComPy) filters out VOLATILE_COLUMNS before comparison."""
+        tool = AlteryxTool(
+            tool_id=1,
+            plugin="AlteryxBasePluginsGui.OutputData.OutputData",
+            tool_type="OutputData",
+            config={},
+            output_fields=[AlteryxField(name="id", type="Int64")],
+        )
+        wf = _make_workflow(tools={1: tool})
+        steps = {1: GeneratedStep(step_name="output", code="df_1 = ...", output_df="df_1")}
+
+        generate_validator_v2(tmp_path, wf, steps, [1])
+        content = (tmp_path / "04_validate.py").read_text(encoding="utf-8")
+
+        # Section 5 should drop VOLATILE_COLUMNS before DataComPy comparison
+        assert "compare_alt = alteryx_df.drop(*VOLATILE_COLUMNS)" in content
+        assert "compare_dbx = " in content
+        assert "base_df=compare_alt" in content
+        assert "compare_df=compare_dbx" in content

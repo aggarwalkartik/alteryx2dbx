@@ -36,7 +36,7 @@ def _build_dict_entries(tools: dict[int, AlteryxTool], type_set: set[str]) -> li
     return entries
 
 
-def generate_config_notebook(workflow: AlteryxWorkflow, output_dir: Path) -> None:
+def generate_config_notebook(workflow: AlteryxWorkflow, output_dir: Path, *, has_box: bool = False) -> None:
     """Write a _config.py Databricks notebook with widget-based parameterization."""
     cells: list[str] = []
 
@@ -81,6 +81,13 @@ def generate_config_notebook(workflow: AlteryxWorkflow, output_dir: Path) -> Non
         f"{outputs_body}\n"
         "}"
     )
+
+    if has_box:
+        cells.append(
+            "# Box.com configuration\n"
+            'dbutils.widgets.text("box_secret_scope", "box", "Databricks Secret scope for Box JWT credentials")\n'
+            'BOX_SECRET_SCOPE = dbutils.widgets.get("box_secret_scope")'
+        )
 
     content = _CELL_SEP.join(cells) + "\n"
     output_dir.mkdir(parents=True, exist_ok=True)
