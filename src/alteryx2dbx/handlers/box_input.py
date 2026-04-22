@@ -81,3 +81,4 @@ class BoxInputHandler(ToolHandler):
 
 
 register_prefix_handler("box_input_v", BoxInputHandler)
+register_prefix_handler("BoxInput", BoxInputHandler)

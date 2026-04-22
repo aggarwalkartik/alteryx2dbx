@@ -28,7 +28,7 @@ class HandlerRegistry:
         if handler_cls:
             return handler_cls()
         for prefix, cls in self._prefix_handlers.items():
-            if tool.plugin.startswith(prefix):
+            if tool.plugin.startswith(prefix) or tool.tool_type.startswith(prefix):
                 return cls()
         return UnsupportedHandler()
 

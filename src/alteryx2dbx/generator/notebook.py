@@ -71,8 +71,10 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     _write_orchestrator(orchestrator_path, workflow.name, output_ids, steps)
 
     # 8. Syntax-validate generated notebooks
+    syntax_errors: list[str] = []
     for nb_path in (load_path, transform_path, orchestrator_path):
-        _validate_syntax(nb_path)
+        if not _validate_syntax(nb_path):
+            syntax_errors.append(nb_path.name)
 
     # 9. Validator
     last_output_df = steps[output_ids[-1]].output_df if output_ids else "df_result"
@@ -94,6 +96,7 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
             workflow.tools[tid].tool_type for tid, s in steps.items() if s.confidence == 0
         ],
         "errors": [],
+        "syntax_errors": syntax_errors,
     }
 
 

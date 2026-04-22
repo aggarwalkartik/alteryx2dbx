@@ -5,6 +5,7 @@ from pathlib import Path
 from .parser.xml_parser import parse_yxmd
 from .parser.unpacker import unpack_source
 from .manifest import serialize_manifest, load_manifest
+from .starter import write_starter
 from .generator.notebook import generate_notebooks
 from .generator.notebook_v2 import generate_notebooks_v2
 from .generator.batch_report import generate_batch_report
@@ -42,6 +43,28 @@ def _load_plugins():
 def main():
     """alteryx2dbx -- Convert Alteryx workflows to PySpark Databricks notebooks."""
     pass
+
+
+@main.command()
+@click.option("-o", "--output", default="./alteryx2dbx_starter.py", show_default=True,
+              help="Path to write the starter notebook.")
+@click.option("-f", "--force", is_flag=True, default=False,
+              help="Overwrite if the file already exists.")
+def init(output, force):
+    """Write a Databricks starter notebook (widgets + install + run) to OUTPUT.
+
+    On Databricks, run this inside a notebook cell with the target path in your
+    Workspace, e.g. ``!alteryx2dbx init -o /Workspace/Users/you@company.com/alteryx2dbx_starter.py``.
+    Then open the file in the Databricks UI — it's a valid notebook.
+    """
+    path = Path(output)
+    if path.exists() and not force:
+        click.echo(f"Refusing to overwrite {path}. Pass --force to replace.", err=True)
+        ctx = click.get_current_context()
+        ctx.exit(1)
+    written = write_starter(path)
+    click.echo(f"Wrote starter notebook: {written}")
+    click.echo("Next: open it in Databricks, fill in the widgets, and run.")
 
 
 @main.command()
@@ -118,6 +141,8 @@ def convert(source, output, report, full):
             stats = generate_notebooks_v2(wf, output_path) if full else generate_notebooks(wf, output_path)
             results.append(stats)
             click.echo(f"  Done: {output_path / wf.name}/")
+            for bad in stats.get("syntax_errors", []):
+                click.echo(f"  WARN: generated file has syntax error — {bad}", err=True)
         except Exception as e:
             click.echo(f"  Error: {e}", err=True)
             results.append({
@@ -127,6 +152,7 @@ def convert(source, output, report, full):
                 "avg_confidence": 0,
                 "unsupported_tools": [],
                 "errors": [str(e)],
+                "syntax_errors": [],
             })
         finally:
             unpacked.cleanup()
@@ -134,7 +160,17 @@ def convert(source, output, report, full):
         output_path.mkdir(parents=True, exist_ok=True)
         generate_batch_report(output_path, results)
         click.echo(f"Report: {output_path / 'batch_report.md'}")
+    total_syntax_errors = sum(len(r.get("syntax_errors", [])) for r in results)
+    total_errors = sum(len(r.get("errors", [])) for r in results)
     click.echo(f"\nDone. Converted {len(files)} workflow(s).")
+    if total_syntax_errors or total_errors:
+        click.echo(
+            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors. "
+            "Review the WARN lines above before running the generated notebooks.",
+            err=True,
+        )
+        ctx = click.get_current_context()
+        ctx.exit(1)
 
 
 @main.command()
@@ -164,11 +200,14 @@ def generate(manifest, output, report):
             stats = generate_notebooks_v2(wf, output_path)
             results.append(stats)
             click.echo(f"  Done: {output_path / wf.name}/")
+            for bad in stats.get("syntax_errors", []):
+                click.echo(f"  WARN: generated file has syntax error — {bad}", err=True)
         except Exception as e:
             click.echo(f"  Error: {e}", err=True)
             results.append({
                 "name": m.stem, "tools_total": 0, "tools_converted": 0,
                 "avg_confidence": 0, "unsupported_tools": [], "errors": [str(e)],
+                "syntax_errors": [],
             })
 
     if report:
@@ -176,7 +215,17 @@ def generate(manifest, output, report):
         generate_batch_report(output_path, results)
         click.echo(f"Report: {output_path / 'batch_report.md'}")
 
+    total_syntax_errors = sum(len(r.get("syntax_errors", [])) for r in results)
+    total_errors = sum(len(r.get("errors", [])) for r in results)
     click.echo(f"\nDone. Generated {len(manifests)} workflow(s).")
+    if total_syntax_errors or total_errors:
+        click.echo(
+            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors. "
+            "Review the WARN lines above before running the generated notebooks.",
+            err=True,
+        )
+        ctx = click.get_current_context()
+        ctx.exit(1)
 
 
 @main.command()

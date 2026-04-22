@@ -94,3 +94,4 @@ class BoxOutputHandler(ToolHandler):
 
 
 register_prefix_handler("box_output_v", BoxOutputHandler)
+register_prefix_handler("BoxOutput", BoxOutputHandler)

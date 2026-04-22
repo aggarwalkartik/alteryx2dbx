@@ -131,8 +131,10 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     _write_orchestrator(orchestrator_path, workflow.name)
 
     # 8. Syntax-validate generated notebooks
+    syntax_errors: list[str] = []
     for nb_path in (load_path, transform_path, output_path):
-        _validate_syntax(nb_path)
+        if not _validate_syntax(nb_path):
+            syntax_errors.append(nb_path.name)
 
     # 9. Config notebook
     has_box = _has_box_tools(workflow)
@@ -172,6 +174,7 @@ def generate_notebooks_v2(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
             workflow.tools[tid].tool_type for tid, s in steps.items() if s.confidence == 0
         ],
         "errors": [],
+        "syntax_errors": syntax_errors,
     }
 
 

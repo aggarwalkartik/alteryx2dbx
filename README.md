@@ -30,19 +30,37 @@ uv tool install alteryx2dbx
 alteryx2dbx --help
 ```
 
-**On Databricks** (once published to PyPI)
+**On Databricks**
+
+Install directly from GitHub (works today, no PyPI needed):
 
 ```python
-%pip install alteryx2dbx
-dbutils.library.restartPython()     # required on DBR 13+ for %pip to take effect
+# Cell 1
+%pip install --no-cache-dir --force-reinstall git+https://github.com/aggarwalkartik/alteryx2dbx.git
+
+# Cell 2
+%restart_python
+
+# Cell 3
+import alteryx2dbx
+print(alteryx2dbx.__version__)          # verify
 ```
 
-Dev loop alternative — editable install from a Workspace repo:
+Then generate a starter notebook with widgets for the paths so you don't retype them:
 
 ```python
-%pip install -e /Workspace/Repos/your-name/alteryx2dbx
-dbutils.library.restartPython()
+# Cell 4
+!alteryx2dbx init -o /Workspace/Users/<you@company.com>/alteryx2dbx_starter.py
 ```
+
+Open `alteryx2dbx_starter.py` in the Databricks UI — it's a real notebook with three widgets (`workflow_path`, `output_dir`, `mode`) and an execute cell. Fill in the widgets, run.
+
+Once published to PyPI, replace Cell 1 with `%pip install alteryx2dbx`. Everything else is the same. The older `dbutils.library.restartPython()` is equivalent to `%restart_python` if you prefer.
+
+**Path conventions on Databricks**
+
+- **Inputs** (`.yxmd` files): put them in a Unity Catalog Volume — `/Volumes/<catalog>/<schema>/alteryx/`. Volumes are the designed-for-data path and avoid the "spaces in Workspace paths break shell commands" problem.
+- **Outputs** (generated notebooks): write to a Workspace folder — `/Workspace/Users/<you@company.com>/…` — so you can open them in the Databricks UI.
 
 ## First run
 
@@ -119,8 +137,8 @@ Generates a comprehensive `migration_report.md` with executive summary, data flo
 **On Databricks:**
 
 ```python
-%pip install -e /Workspace/Repos/your-name/alteryx2dbx
-dbutils.library.restartPython()
+%pip install --no-cache-dir --force-reinstall git+https://github.com/aggarwalkartik/alteryx2dbx.git
+%restart_python
 
 # Upload your .yxmd files to a Volume, then:
 !alteryx2dbx document /Volumes/catalog/schema/workflows/ -o /Volumes/catalog/schema/output/
@@ -169,6 +187,15 @@ Coverage: 3/3 (100%)
 ```bash
 alteryx2dbx tools
 ```
+
+### Generate a Databricks starter notebook
+
+```bash
+alteryx2dbx init                                           # writes ./alteryx2dbx_starter.py
+alteryx2dbx init -o /Workspace/Users/you@company.com/starter.py
+```
+
+Writes a Databricks notebook (widgets + install + run). Open the file in the Databricks UI, fill in `workflow_path`, `output_dir`, and `mode`, and run. See the **On Databricks** block in the Install section for the full flow.
 
 ## Output Structure
 
