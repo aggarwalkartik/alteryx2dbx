@@ -8,15 +8,55 @@ Migrating Alteryx workflows to Databricks is tedious. Teams walk through each wo
 
 `alteryx2dbx` takes a different approach. It parses the Alteryx XML directly, resolves the DAG, and emits PySpark through a rule-based transpiler. Every expression mapping is explicit and auditable. When something can't be converted, it's marked as unsupported with the original XML preserved in comments. Nothing is silently dropped.
 
-## Quick Start
+## Install
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+**From source (recommended while pre-PyPI)**
 
 ```bash
 git clone https://github.com/aggarwalkartik/alteryx2dbx.git
 cd alteryx2dbx
-pip install -e ".[dev]"
+uv sync
+uv run alteryx2dbx --help    # verify
 ```
 
-Requires Python 3.11+.
+From here, prefix every CLI example below with `uv run` — e.g. `uv run alteryx2dbx convert ...`.
+
+**As a global CLI** (once published to PyPI)
+
+```bash
+uv tool install alteryx2dbx
+alteryx2dbx --help
+```
+
+**On Databricks** (once published to PyPI)
+
+```python
+%pip install alteryx2dbx
+dbutils.library.restartPython()     # required on DBR 13+ for %pip to take effect
+```
+
+Dev loop alternative — editable install from a Workspace repo:
+
+```python
+%pip install -e /Workspace/Repos/your-name/alteryx2dbx
+dbutils.library.restartPython()
+```
+
+## First run
+
+A sample workflow ships with the repo under `examples/`. Convert it end-to-end:
+
+```bash
+uv run alteryx2dbx convert examples/simple_filter.yxmd -o ./output --full
+ls ./output/simple_filter/
+# _config.py  _utils.py  01_load_sources.py  02_transformations.py
+# 03_write_outputs.py  04_validate.py  05_orchestrate.py
+# manifest.json  conversion_report.md
+```
+
+Open `conversion_report.md` for per-tool confidence scores and any semantic fixes that were applied automatically.
 
 ## Usage
 
@@ -80,6 +120,7 @@ Generates a comprehensive `migration_report.md` with executive summary, data flo
 
 ```python
 %pip install -e /Workspace/Repos/your-name/alteryx2dbx
+dbutils.library.restartPython()
 
 # Upload your .yxmd files to a Volume, then:
 !alteryx2dbx document /Volumes/catalog/schema/workflows/ -o /Volumes/catalog/schema/output/
@@ -324,90 +365,8 @@ Expressions using unsupported functions are emitted as `# TODO` comments with th
 
 ## Contributing
 
-### Adding a new tool handler
-
-1. Create a new file in `src/alteryx2dbx/handlers/` (e.g., `crosstab.py`).
-2. Subclass `ToolHandler` and implement the `convert` method:
-
-```python
-from alteryx2dbx.parser.models import AlteryxTool, GeneratedStep
-from .base import ToolHandler
-from .registry import register_type_handler
-
-class CrossTabHandler(ToolHandler):
-    def convert(self, tool: AlteryxTool, input_df_names=None) -> GeneratedStep:
-        input_df = input_df_names[0] if input_df_names else "df_unknown"
-        # Build PySpark code string
-        code = f"df_{tool.tool_id} = {input_df}.groupBy(...).pivot(...)"
-        return GeneratedStep(
-            step_name=f"crosstab_{tool.tool_id}",
-            code=code,
-            imports={"from pyspark.sql import functions as F"},
-            input_dfs=[input_df],
-            output_df=f"df_{tool.tool_id}",
-        )
-
-register_type_handler("CrossTab", CrossTabHandler)
-```
-
-3. Import the module in `src/alteryx2dbx/handlers/__init__.py`:
-
-```python
-from . import crosstab
-```
-
-4. Add a test fixture (`.yxmd` XML) in `tests/fixtures/` and a corresponding test.
-
-### Adding a custom fix via plugin
-
-Create a `plugins/` directory in your project root and add a `.py` file:
-
-```python
-# plugins/my_fixes.py
-def register_fixes(register_fix):
-    register_fix(
-        fix_id="my_org_date_fix",
-        description="Replace DATE_TRUNC with org-specific pattern",
-        severity="warning",
-        fn=_my_date_fix,
-        phase="date-handling",
-    )
-
-def _my_date_fix(code: str, context: dict) -> tuple[str, bool]:
-    if "DATE_TRUNC" in code:
-        return code.replace("DATE_TRUNC", "MY_ORG_DATE_TRUNC"), True
-    return code, False
-```
-
-The plugin is automatically discovered and applied during conversion. No config needed.
-
-### Lessons learned
-
-Track migration pitfalls and share them across your team:
-
-```bash
-alteryx2dbx lessons add \
-  --workflow customer_report \
-  --symptom "Join produced duplicates" \
-  --root-cause "Join keys were not unique" \
-  --fix "Added dedup before join" \
-  --category behavioral_difference
-
-alteryx2dbx lessons list                    # see all lessons
-alteryx2dbx lessons list --unpromoted       # see patterns not yet automated
-alteryx2dbx lessons promote <lesson-id>     # mark as encoded into tool rules
-```
-
-On Databricks, lessons are automatically stored in `/Workspace/Shared/alteryx2dbx/lessons.jsonl` so everyone in the workspace benefits. Locally, they live in the project directory as `lessons.jsonl`.
-
-The tool also auto-captures lessons during every conversion: low-confidence tools, ambiguous patterns, and applied fixes are logged without any manual step.
-
-### Running tests
-
-```bash
-pytest --cov=alteryx2dbx
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, adding tool handlers, writing plugins, and the lessons-learned workflow. Before accepting generated notebooks, work through [REVIEW_GUIDE.md](./REVIEW_GUIDE.md) — the Alteryx vs Spark behavioral-differences checklist.
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).
