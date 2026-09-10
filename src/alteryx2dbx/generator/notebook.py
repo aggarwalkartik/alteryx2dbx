@@ -87,14 +87,26 @@ def generate_notebooks(workflow: AlteryxWorkflow, output_dir: Path) -> dict:
     generate_report(wf_dir, workflow.tools, steps, execution_order)
 
     # 12. Return stats for batch report
+    macro_tools = [
+        {
+            "tool_id": tid,
+            "tool_type": workflow.tools[tid].tool_type,
+            "macro_path": workflow.tools[tid].macro_path,
+        }
+        for tid in execution_order
+        if workflow.tools[tid].is_macro
+    ]
     return {
         "name": workflow.name,
         "tools_total": len(steps),
         "tools_converted": sum(1 for s in steps.values() if s.confidence > 0),
         "avg_confidence": sum(s.confidence for s in steps.values()) / len(steps) if steps else 0,
         "unsupported_tools": [
-            workflow.tools[tid].tool_type for tid, s in steps.items() if s.confidence == 0
+            workflow.tools[tid].tool_type
+            for tid, s in steps.items()
+            if s.confidence == 0 and not workflow.tools[tid].is_macro
         ],
+        "macro_tools": macro_tools,
         "errors": [],
         "syntax_errors": syntax_errors,
     }

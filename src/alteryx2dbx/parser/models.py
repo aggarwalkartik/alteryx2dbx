@@ -51,6 +51,8 @@ class AlteryxTool:
     annotation: str = ""
     input_fields: list[AlteryxField] = field(default_factory=list)
     output_fields: list[AlteryxField] = field(default_factory=list)
+    is_macro: bool = False
+    macro_path: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +63,8 @@ class AlteryxTool:
             "annotation": self.annotation,
             "input_fields": [f.to_dict() for f in self.input_fields],
             "output_fields": [f.to_dict() for f in self.output_fields],
+            "is_macro": self.is_macro,
+            "macro_path": self.macro_path,
         }
 
     @classmethod
@@ -73,6 +77,8 @@ class AlteryxTool:
             annotation=d.get("annotation", ""),
             input_fields=[AlteryxField.from_dict(f) for f in d.get("input_fields", [])],
             output_fields=[AlteryxField.from_dict(f) for f in d.get("output_fields", [])],
+            is_macro=d.get("is_macro", False),
+            macro_path=d.get("macro_path", ""),
         )
 
 

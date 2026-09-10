@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2024.1">
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.DbFileInput.DbFileInput">
+        <Position x="78" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Passwords/>
+          <File OutputFileName="" RecordLimit="" SearchSubDirs="False" FileFormat="19">C:\data\orders.csv</File>
+          <FormatSpecificOptions>
+            <HeaderRow>True</HeaderRow>
+            <NoProgress>False</NoProgress>
+            <Delimeter>,</Delimeter>
+          </FormatSpecificOptions>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name>Input Orders</Name>
+          <DefaultAnnotationText>orders.csv</DefaultAnnotationText>
+          <Left value="False"/>
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="order_id" size="254" type="V_WString"/>
+            <Field name="customer_id" size="254" type="V_WString"/>
+            <Field name="amount" type="Double"/>
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxDbFileInput"/>
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="CleanseOrders">
+        <Position x="258" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration/>
+        <Annotation DisplayMode="0">
+          <Name>Cleanse Orders Macro</Name>
+          <DefaultAnnotationText>CleanseOrders.yxmc</DefaultAnnotationText>
+          <Left value="False"/>
+        </Annotation>
+      </Properties>
+      <EngineSettings Macro="Supporting_Macros\CleanseOrders.yxmc"/>
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.DbFileOutput.DbFileOutput">
+        <Position x="438" y="78"/>
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <File FileFormat="19" MaxRecords="" PassedData="">C:\data\orders_clean.csv</File>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name>Output</Name>
+          <DefaultAnnotationText>orders_clean.csv</DefaultAnnotationText>
+          <Left value="False"/>
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxDbFileOutput"/>
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="1" Connection="Output"/>
+      <Destination ToolID="2" Connection="Input"/>
+    </Connection>
+    <Connection>
+      <Origin ToolID="2" Connection="Output"/>
+      <Destination ToolID="3" Connection="Input"/>
+    </Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True"/>
+    <GlobalRecordLimit value="0"/>
+    <TempFiles default="True"/>
+    <Annotation on="True" includeToolName="False"/>
+    <ConvErrorLimit value="10"/>
+    <ConvErrorLimit_Stop value="False"/>
+    <CancelOnError value="False"/>
+    <DisableBrowse value="False"/>
+    <EnablePerformanceProfiling value="False"/>
+    <DisableAllOutput value="False"/>
+    <ShowAllMacroMessages value="False"/>
+    <ShowConnectionStatusIsOn value="True"/>
+    <ShowConnectionStatusOnlyWhenRunning value="True"/>
+    <ZoomLevel value="0"/>
+    <LayoutType>Horizontal</LayoutType>
+    <MetaInfo>
+      <NameIsFileName value="True"/>
+      <Name>macro_workflow</Name>
+      <Description/>
+      <RootToolName/>
+      <ToolVersion/>
+      <ToolInDb value="False"/>
+      <CategoryName/>
+      <SearchTags/>
+      <Author/>
+      <Company/>
+      <Copyright/>
+      <DescriptionLink actual="" displayed=""/>
+    </MetaInfo>
+  </Properties>
+</AlteryxDocument>

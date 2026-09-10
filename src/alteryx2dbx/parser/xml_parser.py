@@ -123,6 +123,12 @@ def _parse_tools(root: ET.Element) -> dict[int, AlteryxTool]:
         # Extract output fields from MetaInfo/RecordInfo
         output_fields = _extract_fields(node)
 
+        # Detect macro reference. Alteryx stores the macro path on
+        # EngineSettings/@Macro (attribute) or, in some workflow versions, as a
+        # nested <Macro> child element. Either signal marks this node as a
+        # macro invocation rather than a stock tool.
+        is_macro, macro_path = _extract_macro_ref(node)
+
         tools[tool_id] = AlteryxTool(
             tool_id=tool_id,
             plugin=plugin,
@@ -130,9 +136,34 @@ def _parse_tools(root: ET.Element) -> dict[int, AlteryxTool]:
             config=config,
             annotation=annotation,
             output_fields=output_fields,
+            is_macro=is_macro,
+            macro_path=macro_path,
         )
 
     return tools
+
+
+def _extract_macro_ref(node: ET.Element) -> tuple[bool, str]:
+    """Return (is_macro, macro_path) for a Node element.
+
+    Alteryx workflows reference a macro through any of:
+      - ``EngineSettings/@Macro`` attribute
+      - nested ``EngineSettings/Macro`` element (text = path)
+      - nested ``Properties/MetaInfo/Macro`` element (rare legacy form)
+    A ``.yxmc`` extension on the resolved path is the strongest confirmation.
+    """
+    engine = node.find("EngineSettings")
+    if engine is not None:
+        macro_attr = engine.get("Macro")
+        if macro_attr:
+            return True, macro_attr
+        macro_child = engine.find("Macro")
+        if macro_child is not None and (macro_child.text or "").strip():
+            return True, macro_child.text.strip()
+    legacy = node.find("./Properties/MetaInfo/Macro")
+    if legacy is not None and (legacy.text or "").strip():
+        return True, legacy.text.strip()
+    return False, ""
 
 
 def _extract_annotation(node: ET.Element) -> str:

@@ -143,6 +143,12 @@ def convert(source, output, report, full):
             click.echo(f"  Done: {output_path / wf.name}/")
             for bad in stats.get("syntax_errors", []):
                 click.echo(f"  WARN: generated file has syntax error — {bad}", err=True)
+            for macro in stats.get("macro_tools", []):
+                click.echo(
+                    f"  MACRO: tool {macro['tool_id']} references '{macro['macro_path']}' — "
+                    "not converted, will raise at runtime",
+                    err=True,
+                )
         except Exception as e:
             click.echo(f"  Error: {e}", err=True)
             results.append({
@@ -151,6 +157,7 @@ def convert(source, output, report, full):
                 "tools_converted": 0,
                 "avg_confidence": 0,
                 "unsupported_tools": [],
+                "macro_tools": [],
                 "errors": [str(e)],
                 "syntax_errors": [],
             })
@@ -162,11 +169,13 @@ def convert(source, output, report, full):
         click.echo(f"Report: {output_path / 'batch_report.md'}")
     total_syntax_errors = sum(len(r.get("syntax_errors", [])) for r in results)
     total_errors = sum(len(r.get("errors", [])) for r in results)
+    total_macros = sum(len(r.get("macro_tools", [])) for r in results)
     click.echo(f"\nDone. Converted {len(files)} workflow(s).")
-    if total_syntax_errors or total_errors:
+    if total_syntax_errors or total_errors or total_macros:
         click.echo(
-            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors. "
-            "Review the WARN lines above before running the generated notebooks.",
+            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors, "
+            f"{total_macros} macro reference(s) not converted. "
+            "Review the WARN/MACRO lines above before running the generated notebooks.",
             err=True,
         )
         ctx = click.get_current_context()
@@ -202,12 +211,18 @@ def generate(manifest, output, report):
             click.echo(f"  Done: {output_path / wf.name}/")
             for bad in stats.get("syntax_errors", []):
                 click.echo(f"  WARN: generated file has syntax error — {bad}", err=True)
+            for macro in stats.get("macro_tools", []):
+                click.echo(
+                    f"  MACRO: tool {macro['tool_id']} references '{macro['macro_path']}' — "
+                    "not converted, will raise at runtime",
+                    err=True,
+                )
         except Exception as e:
             click.echo(f"  Error: {e}", err=True)
             results.append({
                 "name": m.stem, "tools_total": 0, "tools_converted": 0,
-                "avg_confidence": 0, "unsupported_tools": [], "errors": [str(e)],
-                "syntax_errors": [],
+                "avg_confidence": 0, "unsupported_tools": [], "macro_tools": [],
+                "errors": [str(e)], "syntax_errors": [],
             })
 
     if report:
@@ -217,11 +232,13 @@ def generate(manifest, output, report):
 
     total_syntax_errors = sum(len(r.get("syntax_errors", [])) for r in results)
     total_errors = sum(len(r.get("errors", [])) for r in results)
+    total_macros = sum(len(r.get("macro_tools", [])) for r in results)
     click.echo(f"\nDone. Generated {len(manifests)} workflow(s).")
-    if total_syntax_errors or total_errors:
+    if total_syntax_errors or total_errors or total_macros:
         click.echo(
-            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors. "
-            "Review the WARN lines above before running the generated notebooks.",
+            f"WARN: {total_errors} workflow error(s), {total_syntax_errors} notebook(s) with syntax errors, "
+            f"{total_macros} macro reference(s) not converted. "
+            "Review the WARN/MACRO lines above before running the generated notebooks.",
             err=True,
         )
         ctx = click.get_current_context()
@@ -245,16 +262,30 @@ def analyze(source):
             click.echo(f"\nWorkflow: {wf.name}")
             click.echo(f"Tools: {len(wf.tools)}")
             supported = 0
+            macro_count = 0
             for tool_id in order:
                 tool = wf.tools[tool_id]
                 handler = get_handler(tool)
-                is_supported = type(handler).__name__ != "UnsupportedHandler"
-                if is_supported:
+                handler_name = type(handler).__name__
+                if handler_name == "MacroReferenceHandler":
+                    status = "MACRO"
+                    macro_count += 1
+                    extra = f" (macro: {tool.macro_path})" if tool.macro_path else ""
+                elif handler_name == "UnsupportedHandler":
+                    status = "UNSUPPORTED"
+                    extra = ""
+                else:
+                    status = "OK"
                     supported += 1
-                status = "OK" if is_supported else "UNSUPPORTED"
-                click.echo(f"  [{status}] [{tool_id}] {tool.tool_type}: {tool.annotation}")
+                    extra = ""
+                click.echo(f"  [{status}] [{tool_id}] {tool.tool_type}: {tool.annotation}{extra}")
             pct = supported / len(wf.tools) * 100 if wf.tools else 0
             click.echo(f"Coverage: {supported}/{len(wf.tools)} ({pct:.0f}%)")
+            if macro_count:
+                click.echo(
+                    f"Macros: {macro_count} tool(s) reference macros and will not be converted. "
+                    "See README.md#Limitations."
+                )
         finally:
             unpacked.cleanup()
 

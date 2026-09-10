@@ -3,6 +3,7 @@ from __future__ import annotations
 from alteryx2dbx.parser.models import AlteryxTool
 
 from .base import ToolHandler, UnsupportedHandler
+from .macro_reference import MacroReferenceHandler
 
 
 class HandlerRegistry:
@@ -21,6 +22,10 @@ class HandlerRegistry:
         self._prefix_handlers[prefix] = handler_cls
 
     def get(self, tool: AlteryxTool) -> ToolHandler:
+        # Macro references take precedence — fail loud rather than silently
+        # passing data through an unimplemented macro body.
+        if getattr(tool, "is_macro", False):
+            return MacroReferenceHandler()
         handler_cls = self._handlers.get(tool.plugin)
         if handler_cls:
             return handler_cls()
